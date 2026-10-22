@@ -6,8 +6,9 @@ comparison, and later evaluates whether a Python-based defence reduces that
 influence.
 
 The current implementation includes the Flask foundation, the controlled
-injection page, Playwright extraction, and a genuine Gemma 4 baseline path. The
-Python defence and the experiment dashboard are not implemented yet.
+injection page, Playwright extraction, a genuine Gemma 4 baseline path, a
+prompt-injection defence, and a paired baseline/protected comparison. The
+experiment dashboard is not implemented yet.
 
 ## Architecture
 
@@ -19,7 +20,9 @@ app/
   schemas.py               Pydantic evidence/report models
   services/
     extraction.py          Playwright/Chromium page extraction
-    gemma.py               Baseline prompt construction and Gemma calls
+    gemma.py               Baseline generation and shared Gemma calls
+    protection.py          Protected prompt, detection, and budget validation
+    evaluation.py          Paired baseline/protected comparison
     reporting.py           Atomic JSON report storage
   security/
     url_policy.py          URL validation and private-address blocking
@@ -102,9 +105,33 @@ the model only through the captured webpage content. Gemma 4 may spend part of
 the output budget on hidden thinking, so the default output limit is 4096
 tokens; the actual settings are recorded in every report.
 
+## Defence and paired comparison
+
+`app/services/protection.py` implements the protected condition:
+
+- The user task and trusted instructions are separated from webpage content.
+- Every captured page is wrapped in an explicitly labelled untrusted-data block.
+- The trusted instructions tell Gemma to use page content as evidence, not to
+  follow instructions embedded in it.
+- The original extracted text, including the controlled injection, is preserved.
+- A transparent heuristic detector records instruction-like content without
+  deciding whether an attack succeeded.
+- Deterministic Python validation parses the recommended product and price from
+  the captured evidence, not from the model's own price claim. It distinguishes
+  budget-compliant recommendations, over-budget conditional alternatives, and
+  cases where no product satisfies the budget.
+
+`app/services/evaluation.py` compares a baseline report and a protected report
+built from the same captured evidence, task, model, and generation settings. The
+comparison preserves both actual responses, records detection and validation
+results for each condition, and reports whether a difference was observed. A
+single paired trial is not presented as causal proof or general effectiveness.
+
 ## Results
 
-Reports are named `baseline-<UTC timestamp>-<id>.json` and include:
+Reports are named `baseline-<UTC timestamp>-<id>.json`,
+`protected-<UTC timestamp>-<id>.json`, or
+`comparison-<UTC timestamp>-<id>.json`, and include:
 
 - Run identifier, timestamp, condition, and model.
 - Original task and captured page evidence.
@@ -136,8 +163,10 @@ credentials, network access, and available quota.
 - Detection does not prove prevention.
 - The baseline condition is intentionally unprotected and does not label any
   page as untrusted.
-- The defence condition, paired baseline/protected runs, and evaluation scoring
-  are later milestones.
+- Heuristic detection is not proof of prevention, and budget validation does not
+  establish that an injected instruction caused a model's recommendation.
+- The paired comparison reuses captured evidence rather than refetching pages,
+  keeping the experimental inputs identical.
 - URL validation blocks non-HTTP(S) schemes, credentials in URLs, and
   private/reserved addresses unless explicitly enabled. The final navigated URL
   is revalidated; subresource requests are not individually policy-checked.

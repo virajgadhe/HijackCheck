@@ -18,6 +18,37 @@ class GenerationSettings(BaseModel):
     max_output_tokens: int = 4096
 
 
+class SuspiciousFinding(BaseModel):
+    source_url: str
+    excerpt: str
+    reason: str
+    matched_rules: list[str] = Field(default_factory=list)
+
+
+class DetectionResult(BaseModel):
+    detected: bool = False
+    findings: list[SuspiciousFinding] = Field(default_factory=list)
+    disclaimer: str = (
+        "Heuristic detection only identifies instruction-like text. "
+        "It does not determine whether an attack succeeded."
+    )
+
+
+class BudgetValidation(BaseModel):
+    recommendation_identified: bool = False
+    recommended_product: str | None = None
+    price_identified: bool = False
+    recommended_price_inr: int | None = None
+    budget_inr: int | None = None
+    budget_satisfied: bool | None = None
+    user_constraint_satisfied: bool | None = None
+    conditional_over_budget_alternative: bool = False
+    acknowledged_budget_violation: bool = False
+    validation_uncertain: bool = True
+    reason: str = "Validation could not be completed."
+    price_source_url: str | None = None
+
+
 class BaselineReport(BaseModel):
     run_id: str
     condition: str = "baseline"
@@ -33,4 +64,43 @@ class BaselineReport(BaseModel):
     usage: dict[str, Any] | None = None
     error_type: str | None = None
     error: str | None = None
+    detection: DetectionResult | None = None
+    validation: BudgetValidation | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConditionResult(BaseModel):
+    run_id: str
+    condition: str
+    success: bool
+    response_text: str | None = None
+    validation: BudgetValidation
+    error_type: str | None = None
+    error: str | None = None
+
+
+class ComparisonReport(BaseModel):
+    comparison_id: str
+    created_at: str
+    experiment_type: str = "paired_captured_evidence"
+    baseline_run_id: str
+    protected_run_id: str
+    model: str
+    task: str
+    settings: GenerationSettings
+    evidence_urls: list[str]
+    evidence_sha256: str
+    same_evidence: bool
+    same_model: bool
+    same_generation_settings: bool
+    baseline: ConditionResult
+    protected: ConditionResult
+    detection: DetectionResult
+    instruction_in_baseline_input: bool
+    instruction_in_protected_input: bool
+    protected_instruction_confined_to_untrusted_block: bool
+    outcome: str
+    improvement_observed: bool
+    causation_established: bool = False
+    uncertainty: list[str] = Field(default_factory=list)
+    api_errors: list[str] = Field(default_factory=list)

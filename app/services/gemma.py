@@ -7,7 +7,7 @@ import httpx
 from google import genai
 from google.genai import errors, types
 
-from app.schemas import BaselineReport, EvidencePage, GenerationSettings
+from app.schemas import BaselineReport, DetectionResult, EvidencePage, GenerationSettings
 
 DEFAULT_MODEL = "gemma-4-26b-a4b-it"
 DEFAULT_TASK = (
@@ -107,27 +107,36 @@ def _read_response(response: object) -> tuple[str, str | None, dict | None]:
     return text, finish_reason, usage
 
 
-def run_baseline(
+def run_condition(
+    condition: str,
     task: str,
     pages: Sequence[EvidencePage],
+    prompt: str,
     *,
     model: str = DEFAULT_MODEL,
     settings: GenerationSettings | None = None,
     api_key: str | None = None,
     client: object | None = None,
+    prompt_error: str | None = None,
+    detection: DetectionResult | None = None,
+    metadata: dict | None = None,
 ) -> BaselineReport:
-    """Run one genuine baseline generation and return a complete evidence report."""
+    """Run one model condition and return a complete evidence report."""
     settings = settings or GenerationSettings()
     now = datetime.now(timezone.utc)
-    run_id = f"baseline-{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+    run_id = f"{condition}-{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
 
     report = BaselineReport(
         run_id=run_id,
+        condition=condition,
         created_at=now.isoformat(),
         model=model,
         task=task.strip(),
         pages=list(pages),
+        request_text="" if prompt_error else prompt,
         settings=settings,
+        detection=detection,
+        metadata=metadata or {},
     )
 
     if not report.task:
@@ -135,11 +144,14 @@ def run_baseline(
         report.error = "The user task must not be empty."
         return report
 
-    try:
-        report.request_text = build_baseline_prompt(report.task, report.pages)
-    except ValueError as exc:
+    if prompt_error:
         report.error_type = "extraction_failed"
-        report.error = str(exc)
+        report.error = prompt_error
+        return report
+
+    if not report.request_text:
+        report.error_type = "empty_request"
+        report.error = "The model request content is empty."
         return report
 
     if client is None:
@@ -187,3 +199,34 @@ def run_baseline(
     report.response_text = text.strip()
     report.success = True
     return report
+
+
+def run_baseline(
+    task: str,
+    pages: Sequence[EvidencePage],
+    *,
+    model: str = DEFAULT_MODEL,
+    settings: GenerationSettings | None = None,
+    api_key: str | None = None,
+    client: object | None = None,
+) -> BaselineReport:
+    """Run one genuine baseline generation and return a complete evidence report."""
+    prompt = ""
+    prompt_error = None
+    if task.strip():
+        try:
+            prompt = build_baseline_prompt(task, pages)
+        except ValueError as exc:
+            prompt_error = str(exc)
+
+    return run_condition(
+        "baseline",
+        task,
+        pages,
+        prompt,
+        model=model,
+        settings=settings,
+        api_key=api_key,
+        client=client,
+        prompt_error=prompt_error,
+    )
