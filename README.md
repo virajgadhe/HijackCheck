@@ -34,7 +34,21 @@ app/
 instance/runs/             Generated experiment reports (ignored by Git)
 tests/                     Unit and local integration tests
 run.py                     Flask entry point
+
+
 ```
+
+<img width="1848" height="1004" alt="image" src="https://github.com/user-attachments/assets/91565b57-b9dc-4702-82bb-e71105d291bd" />
+<img width="1848" height="1004" alt="image" src="https://github.com/user-attachments/assets/3d7878ca-a926-49b8-96cf-eb6b727d6016" />
+<img width="1848" height="1004" alt="image" src="https://github.com/user-attachments/assets/2a03ea59-c0c9-4372-89c6-adb80d5e1312" />
+
+- Malicious Website
+  <img width="1848" height="1004" alt="image" src="https://github.com/user-attachments/assets/50db4046-5178-4ec4-bf4d-aeffc3caf439" />
+
+  
+
+
+
 
 ## Requirements
 
