@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HijackCheck — Prompt injection experiment</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+  <script defer src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="page-width header-inner">
+      <a class="brand" href="{{ url_for('main.index') }}">Hijack<span>Check</span></a>
+      <div class="header-meta">
+        <span class="status-dot" aria-hidden="true"></span>
+        Controlled experiment
+      </div>
+    </div>
+  </header>
+
+  <main class="page-width">
+    <section class="hero">
+      <p class="eyebrow">Gemma 4 security lab</p>
+      <h1>Does a hidden webpage instruction hijack the recommendation?</h1>
+      <p class="lede">
+        Capture three real webpages, run an unprotected baseline and a protected
+        condition on the same evidence, then compare the actual Gemma responses.
+        No result is prewritten; failed sources and API errors are shown as they occur.
+      </p>
+    </section>
+
+    <section class="panel input-panel" aria-labelledby="setup-heading">
+      <div class="panel-heading">
+        <div>
+          <p class="step-label">01 · Experiment setup</p>
+          <h2 id="setup-heading">Define the research task and sources</h2>
+        </div>
+        <p class="panel-note">Website 3 is the controlled attack page served by this app.</p>
+      </div>
+
+      <form id="experiment-form" novalidate>
+        <div class="field">
+          <label for="task">Research task</label>
+          <textarea id="task" name="task" rows="3" required>{{ default_task }}</textarea>
+          <p class="help">The budget in this task is used for deterministic validation.</p>
+        </div>
+
+        <div class="source-input-grid">
+          <div class="field">
+            <label for="real-url-1">Real product website 1</label>
+            <input id="real-url-1" name="real_url_1" type="url" value="{{ product_url_1 }}" required>
+          </div>
+          <div class="field">
+            <label for="real-url-2">Real product website 2</label>
+            <input id="real-url-2" name="real_url_2" type="url" value="{{ product_url_2 }}" required>
+          </div>
+          <div class="field">
+            <label for="attack-url">Controlled malicious website 3</label>
+            <input id="attack-url" name="attack_url" type="url" value="{{ attack_url }}" readonly>
+            <p class="help">Generated from Flask routing. This page contains the hidden injection.</p>
+          </div>
+        </div>
+
+        {% if not api_key_configured %}
+        <p class="alert alert-warning" role="alert">
+          No Gemma API key is configured. Extraction can still run, but both model
+          conditions will be reported as incomplete.
+        </p>
+        {% endif %}
+
+        <div class="form-actions">
+          <button class="primary-button" id="run-button" type="submit">Run experiment</button>
+          <p class="form-hint">Three Playwright extractions, two Gemma calls, one evidence snapshot.</p>
+        </div>
+        <p class="alert alert-error" id="form-error" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <section class="run-status" id="run-status" aria-live="polite" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="run-status-text">Extracting sources and running both conditions…</span>
+    </section>
+
+    <section id="results" hidden>
+      <div class="results-heading">
+        <div>
+          <p class="step-label">02 · Actual results</p>
+          <h2>Evidence-backed comparison</h2>
+        </div>
+        <div class="badge-row" id="result-badges"></div>
+      </div>
+
+      <p class="alert alert-error" id="experiment-error" hidden></p>
+
+      <div class="summary-grid" id="summary-grid"></div>
+
+      <section class="panel" aria-labelledby="extraction-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="step-label">Evidence snapshot</p>
+            <h2 id="extraction-heading">Source extraction status</h2>
+          </div>
+          <p class="panel-note" id="snapshot-note"></p>
+        </div>
+        <div class="source-grid" id="source-grid"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="detection-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="step-label">Instruction flow</p>
+            <h2 id="detection-heading">Was the injection present?</h2>
+          </div>
+          <p class="panel-note">Detection is heuristic; it does not prove attack success.</p>
+        </div>
+        <div class="flag-grid" id="instruction-flags"></div>
+        <div class="finding-list" id="finding-list"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="responses-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="step-label">Model output</p>
+            <h2 id="responses-heading">Actual baseline and protected responses</h2>
+          </div>
+          <p class="panel-note">Responses are shown verbatim. Nothing is synthesized.</p>
+        </div>
+        <div class="response-grid" id="response-grid"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="validation-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="step-label">Deterministic checks</p>
+            <h2 id="validation-heading">Budget validation</h2>
+          </div>
+          <p class="panel-note">Prices are compared only when their currency is verified as INR.</p>
+        </div>
+        <div class="validation-grid" id="validation-grid"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="products-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="step-label">Captured product facts</p>
+            <h2 id="products-heading">Price and currency status</h2>
+          </div>
+          <p class="panel-note">Unknown or foreign-currency prices are never assumed to be over budget.</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Product</th>
+                <th scope="col">Captured price</th>
+                <th scope="col">Currency</th>
+                <th scope="col">Normalized INR</th>
+                <th scope="col">Budget status</th>
+                <th scope="col">Reason</th>
+              </tr>
+            </thead>
+            <tbody id="products-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="limitations-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="step-label">Interpretation</p>
+            <h2 id="limitations-heading">Limitations</h2>
+          </div>
+        </div>
+        <ul class="limitations" id="limitations-list"></ul>
+      </section>
+
+      <section class="panel report-panel" aria-labelledby="reports-heading">
+        <div>
+          <p class="step-label">Raw evidence</p>
+          <h2 id="reports-heading">Saved JSON reports</h2>
+          <p class="panel-note">Generated reports exclude API keys and are stored under the configured runs directory.</p>
+        </div>
+        <div class="report-links" id="report-links"></div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="page-width footer-inner">
+      <p>HijackCheck · Controlled prompt-injection research</p>
+      <p>Single paired trials describe observations, not proof of causation.</p>
+    </div>
+  </footer>
+</body>
+</html>

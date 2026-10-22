@@ -38,7 +38,12 @@ class BudgetValidation(BaseModel):
     recommendation_identified: bool = False
     recommended_product: str | None = None
     price_identified: bool = False
+    price_currency: str | None = None
+    price_amount: str | None = None
     recommended_price_inr: int | None = None
+    normalized_price_inr: int | None = None
+    normalization_note: str | None = None
+    budget_status: str = "unknown"
     budget_inr: int | None = None
     budget_satisfied: bool | None = None
     user_constraint_satisfied: bool | None = None
@@ -79,6 +84,18 @@ class ConditionResult(BaseModel):
     error: str | None = None
 
 
+class ProductFact(BaseModel):
+    name: str
+    source_url: str
+    price_identified: bool = False
+    price_original: str | None = None
+    price_amount: str | None = None
+    currency: str | None = None
+    normalized_price_inr: int | None = None
+    budget_status: str = "unknown"
+    reason: str = "Price and currency could not be established from captured evidence."
+
+
 class ComparisonReport(BaseModel):
     comparison_id: str
     created_at: str
@@ -99,8 +116,36 @@ class ComparisonReport(BaseModel):
     instruction_in_baseline_input: bool
     instruction_in_protected_input: bool
     protected_instruction_confined_to_untrusted_block: bool
+    products: list[ProductFact] = Field(default_factory=list)
     outcome: str
     improvement_observed: bool
     causation_established: bool = False
     uncertainty: list[str] = Field(default_factory=list)
     api_errors: list[str] = Field(default_factory=list)
+
+
+class EvidenceSnapshot(BaseModel):
+    snapshot_id: str
+    created_at: str
+    task: str
+    pages: list[EvidencePage]
+    evidence_sha256: str
+    extraction_success: bool
+
+
+class ExperimentReport(BaseModel):
+    experiment_id: str
+    created_at: str
+    status: str
+    task: str
+    model: str
+    settings: GenerationSettings
+    snapshot_id: str
+    evidence_sha256: str
+    pages: list[EvidencePage]
+    extraction_success: bool
+    baseline: BaselineReport | None = None
+    protected: BaselineReport | None = None
+    comparison: ComparisonReport | None = None
+    error: str | None = None
+    report_files: dict[str, str] = Field(default_factory=dict)

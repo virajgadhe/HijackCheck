@@ -1,12 +1,44 @@
-from flask import Blueprint, current_app, jsonify, render_template, request
+import re
+from flask import (
+    Blueprint,
+    current_app,
+    jsonify,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 
 from app.schemas import EvidencePage
 from app.security.url_policy import URLPolicyError, validate_url
+from app.services.experiment import ExperimentValidationError, run_experiment
 from app.services.extraction import extract_page
 from app.services.gemma import DEFAULT_TASK, run_baseline
 from app.services.reporting import save_report
 
 main = Blueprint("main", __name__)
+
+DEMO_PRODUCT_URLS = (
+    "https://system76.com/laptops/lemur-pro",
+    "https://system76.com/laptops/darter-pro",
+)
+REPORT_FILENAME = re.compile(r"^[A-Za-z0-9._-]+\.json$")
+
+
+def _controlled_url() -> str:
+    return url_for("main.attack_page", _external=True)
+
+
+@main.get("/")
+def index():
+    return render_template(
+        "index.html",
+        default_task=DEFAULT_TASK,
+        product_url_1=DEMO_PRODUCT_URLS[0],
+        product_url_2=DEMO_PRODUCT_URLS[1],
+        attack_url=_controlled_url(),
+        api_key_configured=bool(current_app.config["GOOGLE_API_KEY"]),
+    )
 
 
 @main.get("/health")
@@ -17,6 +49,56 @@ def health():
 @main.get("/lab/attack-page")
 def attack_page():
     return render_template("lab/attack_page.html")
+
+
+@main.post("/api/experiment")
+def experiment():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Request body must be a JSON object."), 400
+
+    task = payload.get("task")
+    urls = payload.get("urls")
+    if not isinstance(urls, list):
+        return jsonify(error="'urls' must contain exactly three URLs."), 400
+
+    try:
+        outcome = run_experiment(
+            task,
+            urls,
+            controlled_url=_controlled_url(),
+            model=current_app.config["GEMMA_MODEL"],
+            api_key=current_app.config["GOOGLE_API_KEY"],
+            runs_dir=current_app.config["RUNS_DIR"],
+            extraction_timeout_ms=int(current_app.config["EXTRACTION_TIMEOUT_MS"]),
+        )
+    except ExperimentValidationError as exc:
+        return jsonify(error=str(exc)), 400
+
+    report_urls = {
+        key: url_for("main.report_file", filename=filename)
+        for key, filename in outcome.report.report_files.items()
+    }
+    report_urls["experiment"] = url_for(
+        "main.report_file", filename=outcome.experiment_path.name
+    )
+
+    return (
+        jsonify(
+            experiment=outcome.report.model_dump(mode="json"),
+            report_urls=report_urls,
+        ),
+        outcome.status_code,
+    )
+
+
+@main.get("/api/reports/<filename>")
+def report_file(filename: str):
+    if not REPORT_FILENAME.fullmatch(filename):
+        return jsonify(error="Report not found."), 404
+    return send_from_directory(
+        current_app.config["RUNS_DIR"], filename, mimetype="application/json"
+    )
 
 
 @main.post("/api/baseline")

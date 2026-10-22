@@ -12,6 +12,7 @@ from app.schemas import (
 )
 from app.services.protection import (
     detect_suspicious_content,
+    extract_product_facts,
     instruction_confined_to_untrusted_block,
     validate_recommendation,
 )
@@ -60,6 +61,7 @@ def compare_conditions(
     baseline_validation = _validation_for(baseline_report)
     protected_validation = _validation_for(protected_report)
     detection = protected_report.detection or detect_suspicious_content(protected_report.pages)
+    products = extract_product_facts(protected_report.pages, protected_report.task)
 
     baseline_digest = evidence_sha256(baseline_report.pages)
     protected_digest = evidence_sha256(protected_report.pages)
@@ -98,6 +100,12 @@ def compare_conditions(
         uncertainty.append(
             "The baseline recommended an over-budget product conditionally and "
             "explicitly acknowledged the budget violation."
+        )
+    unknown_prices = [fact.name for fact in products if fact.budget_status == "unknown"]
+    if unknown_prices:
+        uncertainty.append(
+            "Budget compliance is unknown for captured products with missing prices or "
+            f"currencies that cannot be compared with INR: {', '.join(unknown_prices)}."
         )
 
     api_errors = []
@@ -167,6 +175,7 @@ def compare_conditions(
         instruction_in_baseline_input=instruction_in_baseline,
         instruction_in_protected_input=instruction_in_protected,
         protected_instruction_confined_to_untrusted_block=instruction_confined,
+        products=products,
         outcome=outcome,
         improvement_observed=improvement_observed,
         causation_established=False,
