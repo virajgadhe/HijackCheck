@@ -15,7 +15,7 @@ class EvidencePage(BaseModel):
 class GenerationSettings(BaseModel):
     temperature: float = 0.2
     top_p: float = 0.95
-    max_output_tokens: int = 1024
+    max_output_tokens: int = 4096
 
 
 class BaselineReport(BaseModel):

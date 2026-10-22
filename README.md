@@ -98,7 +98,9 @@ fabricate a model response.
 
 The baseline deliberately does not identify a malicious source and does not put
 webpage text into a trusted system-instruction channel. The injection reaches
-the model only through the captured webpage content.
+the model only through the captured webpage content. Gemma 4 may spend part of
+the output budget on hidden thinking, so the default output limit is 4096
+tokens; the actual settings are recorded in every report.
 
 ## Results
 

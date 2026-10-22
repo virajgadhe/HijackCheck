@@ -71,6 +71,10 @@ class FakeClient:
         self.models = FakeModels(response=response, exception=exception)
 
 
+def test_default_output_budget_accounts_for_thinking_tokens():
+    assert GenerationSettings().max_output_tokens == 4096
+
+
 def test_prompt_preserves_task_and_complete_injection():
     pages = make_pages()
     prompt = build_baseline_prompt(TASK, pages)
