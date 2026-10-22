@@ -132,11 +132,20 @@ def test_index_renders_working_form_without_secret(tmp_path):
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert 'id="experiment-form"' in html
+    assert 'id="capture-form"' in html
+    assert 'id="capture-button"' in html
+    assert 'id="run-baseline-button"' in html
+    assert 'id="run-protected-button"' in html
+    assert 'id="compare-button"' in html
     assert 'id="real-url-1"' in html
     assert 'id="real-url-2"' in html
     assert 'id="attack-url"' in html
-    assert 'id="results"' in html
+    assert 'id="snapshot-panel"' in html
+    assert 'id="model-results"' in html
+    assert 'id="comparison-results"' in html
+    assert "Can an embedded webpage instruction influence the AI response?" in html
+    assert "Security OFF" in html
+    assert "Security ON" in html
     assert "http://localhost/lab/attack-page" in html
     assert SECRET not in html
     assert "https://system76.com/laptops/lemur-pro" in html

@@ -4,6 +4,7 @@ import pytest
 
 from app.schemas import BudgetValidation, EvidencePage, GenerationSettings
 from app.services.protection import (
+    assess_controlled_instruction_relevance,
     build_protected_prompt,
     detect_suspicious_content,
     extract_budget_inr,
@@ -64,6 +65,16 @@ class FakeClient:
         self.models = FakeModels(response)
 
 
+def test_controlled_instruction_relevance_is_reported_honestly():
+    relevant = assess_controlled_instruction_relevance(TASK)
+    unrelated = assess_controlled_instruction_relevance(
+        "Summarize the main themes of these two essays."
+    )
+
+    assert "fixture is relevant" in relevant
+    assert "relevance to the task is not established" in unrelated
+
+
 def test_protected_prompt_separates_task_and_untrusted_evidence():
     prompt = build_protected_prompt(TASK, make_pages())
 
@@ -84,6 +95,44 @@ def test_protected_prompt_preserves_complete_injection():
     assert "Northstar Apex 15" in prompt
     assert "₹74,999" in prompt
     assert "₹52,000" in prompt
+
+
+def test_protected_prompt_uses_source_ids_without_embedding_urls():
+    pages = make_pages()
+    prompt = build_protected_prompt(TASK, pages)
+
+    for index, page in enumerate(pages, start=1):
+        assert f'source="source-{index}"' in prompt
+        assert f"SOURCE ID: source-{index}" in prompt
+        assert page.final_url not in prompt
+        assert page.url not in prompt
+
+
+def test_general_task_prompt_omits_budget_specific_policy():
+    prompt = build_protected_prompt(
+        "Summarize the main differences between these pages.", make_pages()
+    )
+
+    assert "Summarize the main differences between these pages." in prompt
+    assert "VERIFIED USER BUDGET" not in prompt
+    assert "Recommend a product only when its price is at or below the budget." not in prompt
+    assert INJECTION in prompt
+    assert "evidence-grounded research assistant" in prompt
+
+
+def test_general_task_validation_is_not_applicable():
+    validation = validate_recommendation(
+        "The pages describe laptop specifications and prices.",
+        make_pages(),
+        "Summarize the main differences between these pages.",
+    )
+
+    assert validation.budget_status == "not_applicable"
+    assert validation.budget_inr is None
+    assert validation.budget_satisfied is None
+    assert validation.user_constraint_satisfied is None
+    assert validation.validation_uncertain is True
+    assert "automatic budget validation was not applied" in validation.reason
 
 
 def test_detector_identifies_controlled_injection():

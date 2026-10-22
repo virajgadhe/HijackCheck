@@ -11,7 +11,17 @@ from flask import (
 
 from app.schemas import EvidencePage
 from app.security.url_policy import URLPolicyError, validate_url
-from app.services.experiment import ExperimentValidationError, run_experiment
+from app.services.experiment import (
+    ExperimentValidationError,
+    IncompatibleRunsError,
+    MissingConditionRunError,
+    SnapshotNotFoundError,
+    SnapshotNotUsableError,
+    capture_evidence,
+    compare_saved_snapshot,
+    run_experiment,
+    run_saved_condition,
+)
 from app.services.extraction import extract_page
 from app.services.gemma import DEFAULT_TASK, run_baseline
 from app.services.reporting import save_report
@@ -49,6 +59,126 @@ def health():
 @main.get("/lab/attack-page")
 def attack_page():
     return render_template("lab/attack_page.html")
+
+
+def _report_url(filename: str) -> str:
+    return url_for("main.report_file", filename=filename)
+
+
+def _snapshot_id(payload: dict) -> str:
+    snapshot_id = payload.get("snapshot_id")
+    if not isinstance(snapshot_id, str) or not snapshot_id.strip():
+        raise ExperimentValidationError("'snapshot_id' must be a non-empty string.")
+    return snapshot_id.strip()
+
+
+@main.post("/api/capture")
+def capture():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Request body must be a JSON object."), 400
+
+    task = payload.get("task")
+    urls = payload.get("urls")
+    if not isinstance(urls, list):
+        return jsonify(error="'urls' must contain exactly three URLs."), 400
+
+    try:
+        outcome = capture_evidence(
+            task,
+            urls,
+            controlled_url=_controlled_url(),
+            runs_dir=current_app.config["RUNS_DIR"],
+            extraction_timeout_ms=int(current_app.config["EXTRACTION_TIMEOUT_MS"]),
+        )
+    except ExperimentValidationError as exc:
+        return jsonify(error=str(exc)), 400
+
+    return (
+        jsonify(
+            snapshot=outcome.snapshot.model_dump(mode="json"),
+            report_urls={"snapshot": _report_url(outcome.snapshot_path.name)},
+        ),
+        outcome.status_code,
+    )
+
+
+def _run_mode(condition: str):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Request body must be a JSON object."), 400
+
+    try:
+        snapshot_id = _snapshot_id(payload)
+        outcome = run_saved_condition(
+            snapshot_id,
+            condition,
+            model=current_app.config["GEMMA_MODEL"],
+            api_key=current_app.config["GOOGLE_API_KEY"],
+            runs_dir=current_app.config["RUNS_DIR"],
+        )
+    except ExperimentValidationError as exc:
+        return jsonify(error=str(exc)), 400
+    except SnapshotNotFoundError as exc:
+        return jsonify(error=str(exc)), 404
+    except SnapshotNotUsableError as exc:
+        return jsonify(error=str(exc)), 409
+
+    return (
+        jsonify(
+            report=outcome.report.model_dump(mode="json"),
+            report_urls={
+                condition: _report_url(outcome.report_path.name),
+                "snapshot": _report_url(f"{snapshot_id}.json"),
+            },
+        ),
+        outcome.status_code,
+    )
+
+
+@main.post("/api/run/baseline")
+def run_baseline_mode():
+    return _run_mode("baseline")
+
+
+@main.post("/api/run/protected")
+def run_protected_mode():
+    return _run_mode("protected")
+
+
+@main.post("/api/compare")
+def compare():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Request body must be a JSON object."), 400
+
+    try:
+        snapshot_id = _snapshot_id(payload)
+        outcome = compare_saved_snapshot(
+            snapshot_id,
+            runs_dir=current_app.config["RUNS_DIR"],
+        )
+    except ExperimentValidationError as exc:
+        return jsonify(error=str(exc)), 400
+    except SnapshotNotFoundError as exc:
+        return jsonify(error=str(exc)), 404
+    except MissingConditionRunError as exc:
+        return jsonify(error=str(exc), missing=exc.condition), 409
+    except IncompatibleRunsError as exc:
+        return jsonify(error=str(exc)), 409
+
+    return (
+        jsonify(
+            comparison=outcome.comparison.model_dump(mode="json"),
+            report_urls={
+                "comparison": _report_url(outcome.comparison_path.name),
+                "baseline": _report_url(outcome.baseline_path.name),
+                "protected": _report_url(outcome.protected_path.name),
+                "snapshot": _report_url(f"{snapshot_id}.json"),
+            },
+        ),
+        outcome.status_code,
+    )
 
 
 @main.post("/api/experiment")

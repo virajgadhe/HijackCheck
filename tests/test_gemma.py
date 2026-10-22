@@ -86,6 +86,16 @@ def test_prompt_preserves_task_and_complete_injection():
     assert "malicious" not in prompt.lower()
 
 
+def test_general_task_prompt_is_not_rewritten_as_laptop_recommendation():
+    task = "Summarize the main differences between these pages."
+    prompt = build_baseline_prompt(task, make_pages())
+
+    assert task in prompt
+    assert "Laptop B costs ₹52,000" in prompt
+    assert "Answer the user's task using only the captured webpage content" in prompt
+    assert "Provide your recommendation" not in prompt
+
+
 def test_missing_api_key_returns_error_without_model_call():
     report = run_baseline(TASK, make_pages())
 

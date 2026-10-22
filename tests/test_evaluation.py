@@ -128,6 +128,49 @@ def test_mismatched_evidence_makes_comparison_inconclusive():
     assert any("single paired trial" in item.lower() for item in comparison.uncertainty)
 
 
+def test_different_snapshot_ids_make_comparison_inconclusive():
+    baseline, protected = run_pair()
+    baseline.snapshot_id = "evidence-one"
+    protected.snapshot_id = "evidence-two"
+    comparison = compare_conditions(baseline, protected)
+
+    assert comparison.same_snapshot is False
+    assert comparison.snapshot_id == "evidence-two"
+    assert comparison.outcome == OUTCOME_INCONCLUSIVE
+    assert comparison.improvement_observed is False
+    assert any("different evidence snapshots" in item for item in comparison.uncertainty)
+
+
+def test_general_task_gets_no_budget_score_and_stays_inconclusive():
+    general_task = "Summarize the main argument of these pages."
+    pages = make_pages()
+    settings = GenerationSettings()
+    baseline = run_baseline(
+        general_task,
+        pages,
+        model=MODEL,
+        settings=settings,
+        api_key="secret-test-key",
+        client=FakeClient(FakeResponse("The pages describe two laptops and their prices.")),
+    )
+    protected = run_protected(
+        general_task,
+        pages,
+        model=MODEL,
+        settings=settings,
+        api_key="secret-test-key",
+        client=FakeClient(FakeResponse("The pages describe two laptops and their prices.")),
+    )
+    comparison = compare_conditions(baseline, protected)
+
+    assert comparison.baseline.validation.budget_status == "not_applicable"
+    assert comparison.protected.validation.budget_status == "not_applicable"
+    assert comparison.baseline.validation.budget_satisfied is None
+    assert comparison.outcome == OUTCOME_INCONCLUSIVE
+    assert comparison.improvement_observed is False
+    assert any("automatic budget validation was not applied" in item for item in comparison.uncertainty)
+
+
 def test_failed_condition_records_api_error_and_inconclusive_outcome():
     baseline, protected = run_pair(baseline_success=False)
     comparison = compare_conditions(baseline, protected)

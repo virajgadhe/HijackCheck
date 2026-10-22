@@ -175,6 +175,10 @@ def test_experiment_reuses_one_snapshot_and_saves_real_paired_reports(tmp_path, 
     assert report.baseline.request_text != report.protected.request_text
     assert report.comparison is not None
     assert report.comparison.same_evidence is True
+    assert report.comparison.same_snapshot is True
+    assert report.comparison.snapshot_id == report.snapshot_id
+    assert report.baseline.snapshot_id == report.snapshot_id
+    assert report.protected.snapshot_id == report.snapshot_id
     assert report.comparison.same_model is True
     assert report.comparison.same_generation_settings is True
     assert report.comparison.instruction_in_baseline_input is True

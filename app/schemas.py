@@ -69,6 +69,7 @@ class BaselineReport(BaseModel):
     usage: dict[str, Any] | None = None
     error_type: str | None = None
     error: str | None = None
+    snapshot_id: str | None = None
     detection: DetectionResult | None = None
     validation: BudgetValidation | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -107,7 +108,9 @@ class ComparisonReport(BaseModel):
     settings: GenerationSettings
     evidence_urls: list[str]
     evidence_sha256: str
+    snapshot_id: str | None = None
     same_evidence: bool
+    same_snapshot: bool = True
     same_model: bool
     same_generation_settings: bool
     baseline: ConditionResult
@@ -131,6 +134,7 @@ class EvidenceSnapshot(BaseModel):
     pages: list[EvidencePage]
     evidence_sha256: str
     extraction_success: bool
+    controlled_instruction_note: str = ""
 
 
 class ExperimentReport(BaseModel):

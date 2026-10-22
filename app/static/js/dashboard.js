@@ -1,37 +1,69 @@
 (() => {
   "use strict";
 
-  const form = document.getElementById("experiment-form");
-  const runButton = document.getElementById("run-button");
+  const captureForm = document.getElementById("capture-form");
+  const captureButton = document.getElementById("capture-button");
+  const baselineButton = document.getElementById("run-baseline-button");
+  const protectedButton = document.getElementById("run-protected-button");
+  const compareButton = document.getElementById("compare-button");
   const runStatus = document.getElementById("run-status");
   const runStatusText = document.getElementById("run-status-text");
   const formError = document.getElementById("form-error");
-  const results = document.getElementById("results");
-  const experimentError = document.getElementById("experiment-error");
-  const badges = document.getElementById("result-badges");
-  const summaryGrid = document.getElementById("summary-grid");
+  const modeError = document.getElementById("mode-error");
+
+  const snapshotPanel = document.getElementById("snapshot-panel");
   const sourceGrid = document.getElementById("source-grid");
   const snapshotNote = document.getElementById("snapshot-note");
-  const instructionFlags = document.getElementById("instruction-flags");
-  const findingList = document.getElementById("finding-list");
+  const controlledNote = document.getElementById("controlled-note");
+  const snapshotReportLinks = document.getElementById("snapshot-report-links");
+
+  const modePanel = document.getElementById("mode-panel");
+  const baselineModeStatus = document.getElementById("baseline-mode-status");
+  const protectedModeStatus = document.getElementById("protected-mode-status");
+  const compareModeStatus = document.getElementById("compare-mode-status");
+  const baselineModeError = document.getElementById("baseline-mode-error");
+  const protectedModeError = document.getElementById("protected-mode-error");
+  const compareModeError = document.getElementById("compare-mode-error");
+  const baselineReportLinks = document.getElementById("baseline-report-links");
+  const protectedReportLinks = document.getElementById("protected-report-links");
+
+  const modelResults = document.getElementById("model-results");
+  const modelBadges = document.getElementById("model-badges");
   const responseGrid = document.getElementById("response-grid");
   const validationGrid = document.getElementById("validation-grid");
+
+  const comparisonResults = document.getElementById("comparison-results");
+  const comparisonError = document.getElementById("comparison-error");
+  const badges = document.getElementById("result-badges");
+  const summaryGrid = document.getElementById("summary-grid");
+  const instructionFlags = document.getElementById("instruction-flags");
+  const findingList = document.getElementById("finding-list");
   const productsBody = document.getElementById("products-body");
   const limitationsList = document.getElementById("limitations-list");
   const reportLinks = document.getElementById("report-links");
+
+  const state = {
+    snapshot: null,
+    snapshotReportUrl: null,
+    baseline: null,
+    protected: null,
+    comparison: null,
+    busy: false,
+  };
 
   const STATUS_LABELS = {
     within_budget: "Within budget",
     over_budget: "Over budget",
     unknown: "Unknown",
     no_recommendation: "No qualifying recommendation",
+    not_applicable: "Not applicable",
   };
 
   const REPORT_LABELS = {
     experiment: "Experiment",
     snapshot: "Evidence snapshot",
-    baseline: "Baseline",
-    protected: "Protected",
+    baseline: "Security OFF report",
+    protected: "Security ON report",
     comparison: "Comparison",
   };
 
@@ -56,6 +88,11 @@
     return "Unknown";
   }
 
+  function truncate(text, length) {
+    const value = String(text || "").replace(/\s+/g, " ").trim();
+    return value.length > length ? `${value.slice(0, length - 1)}…` : value;
+  }
+
   function formatInr(value) {
     if (value === null || value === undefined) return "Not applied";
     return new Intl.NumberFormat("en-IN", {
@@ -78,6 +115,49 @@
     return el("span", `badge ${tone || ""}`.trim(), text);
   }
 
+  function setBadge(node, text, tone) {
+    node.textContent = text;
+    node.className = `badge ${tone || ""}`.trim();
+  }
+
+  function friendlyError(report) {
+    if (!report) return "No report was returned.";
+    const type = report.error_type || "error";
+    if (type === "missing_api_key") {
+      return "No Gemma API key is configured. The run is recorded as incomplete.";
+    }
+    if (type === "authentication_error") {
+      return "Gemma rejected the configured API key. Check the server credentials.";
+    }
+    if (type === "quota_error") {
+      return "Gemma quota was exceeded. The failed run is recorded; retry later.";
+    }
+    if (type === "model_unavailable") {
+      return "The configured Gemma model is unavailable. Check the model setting.";
+    }
+    if (type === "api_server_error") {
+      return "Gemma returned HTTP 500 (provider internal error). The failure is recorded; retry this mode later.";
+    }
+    if (type === "network_error") {
+      return "The model request failed because of a network error. The failure is recorded.";
+    }
+    if (type === "empty_response") {
+      return "Gemma returned no text. The empty response is recorded.";
+    }
+    if (report.error) return truncate(report.error, 220);
+    return `The run failed with ${type}. See the saved JSON report for details.`;
+  }
+
+  function summarizeApiError(text) {
+    const value = String(text || "");
+    if (value.includes("missing_api_key")) return "A condition had no API key configured.";
+    if (value.includes("api_server_error")) return "A condition hit a Gemma HTTP 500 provider error.";
+    if (value.includes("authentication_error")) return "A condition hit an authentication error.";
+    if (value.includes("quota_error")) return "A condition hit a quota error.";
+    if (value.includes("network_error")) return "A condition hit a network error.";
+    return truncate(value, 180);
+  }
+
   function addSummary(label, value, detail) {
     const card = el("article", "summary-card");
     card.append(el("span", "label", label), el("span", "value", value));
@@ -92,12 +172,27 @@
   }
 
   function sourceLabel(index) {
-    return index === 2 ? "Controlled malicious source" : `Real product source ${index + 1}`;
+    return index === 2 ? "Controlled test source" : `Research source ${index + 1}`;
   }
 
-  function renderSources(experiment) {
+  function renderReportLinks(container, reportUrls, order) {
+    clear(container);
+    if (!reportUrls) return;
+    const keys = (order || Object.keys(reportUrls)).filter((key) => reportUrls[key]);
+    keys.forEach((key) => {
+      const url = reportUrls[key];
+      if (typeof url !== "string" || !url.startsWith("/api/reports/")) return;
+      const link = el("a", "report-link", REPORT_LABELS[key] || key);
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      container.append(link);
+    });
+  }
+
+  function renderSources(snapshot) {
     clear(sourceGrid);
-    experiment.pages.forEach((page, index) => {
+    snapshot.pages.forEach((page, index) => {
       const card = el("article", `source-card ${page.success ? "ok" : "fail"}`);
       const top = el("div", "source-topline");
       top.append(
@@ -114,105 +209,84 @@
       }
       sourceGrid.append(card);
     });
-    snapshotNote.textContent = `Snapshot ${experiment.snapshot_id} · ${experiment.extraction_success ? "all sources extracted" : "incomplete extraction"}`;
+
+    snapshotNote.textContent = `Snapshot ${snapshot.snapshot_id} · ${snapshot.extraction_success ? "all sources extracted" : "incomplete extraction"}`;
+    controlledNote.textContent = snapshot.controlled_instruction_note || "";
+    setHidden(controlledNote, !snapshot.controlled_instruction_note);
+    renderReportLinks(snapshotReportLinks, { snapshot: state.snapshotReportUrl }, ["snapshot"]);
   }
 
-  function renderDetection(experiment) {
-    clear(instructionFlags);
-    clear(findingList);
-    const comparison = experiment.comparison;
+  function renderModeState() {
+    const baseline = state.baseline;
+    const protectedRun = state.protected;
 
-    if (!comparison) {
-      addFlag("Malicious instruction found", "Not evaluated", "no");
-      addFlag("Instruction reached baseline input", "Not evaluated", "no");
-      addFlag("Instruction reached protected input", "Not evaluated", "no");
-      findingList.append(
-        el("p", "panel-note", "Model conditions were not run because extraction was incomplete.")
-      );
-      return;
-    }
-
-    const detection = comparison.detection;
-    addFlag(
-      "Malicious instruction found",
-      detection.detected ? "Yes" : "No",
-      detection.detected ? "yes" : "no"
-    );
-    addFlag(
-      "Instruction reached baseline input",
-      comparison.instruction_in_baseline_input ? "Yes" : "No",
-      comparison.instruction_in_baseline_input ? "yes" : "no"
-    );
-    addFlag(
-      "Instruction reached protected input",
-      comparison.instruction_in_protected_input ? "Yes" : "No",
-      comparison.instruction_in_protected_input ? "yes" : "no"
-    );
-
-    const confinement = el("article", `flag-card ${comparison.protected_instruction_confined_to_untrusted_block ? "yes" : "no"}`);
-    confinement.append(
-      el("span", "flag-label", "Protected placement"),
-      el("span", "flag-value", comparison.protected_instruction_confined_to_untrusted_block ? "Confined to untrusted block" : "Not confined")
-    );
-    instructionFlags.append(confinement);
-
-    if (!detection.findings.length) {
-      findingList.append(el("p", "panel-note", "No instruction-like text was flagged."));
-      return;
-    }
-
-    detection.findings.forEach((finding) => {
-      const card = el("article", "finding");
-      card.append(el("div", "finding-meta", finding.source_url));
-      card.append(el("blockquote", "", finding.excerpt));
-      const detail = finding.reason;
-      const rules = finding.matched_rules && finding.matched_rules.length
-        ? ` Rules: ${finding.matched_rules.join(", ")}.`
-        : "";
-      card.append(el("p", "", detail + rules));
-      findingList.append(card);
-    });
-  }
-
-  function conditionValidation(experiment, conditionName) {
-    const comparison = experiment.comparison;
-    if (comparison && comparison[conditionName]) {
-      return comparison[conditionName].validation;
-    }
-    const report = experiment[conditionName];
-    return report ? report.validation : null;
-  }
-
-  function renderResponseCard(experiment, conditionName, title) {
-    const comparison = experiment.comparison;
-    const report = experiment[conditionName];
-    const condition = comparison ? comparison[conditionName] : null;
-    const success = condition ? condition.success : Boolean(report && report.success);
-    const card = el("article", `response-card ${success ? "" : "failed"}`.trim());
-
-    const header = el("header");
-    header.append(el("h3", "", title), el("span", `badge ${success ? "success" : "danger"}`, success ? "Success" : "Failed"));
-    card.append(header);
-
-    let text = "";
-    if (report && report.response_text) {
-      text = report.response_text;
-    } else if (report) {
-      const type = report.error_type || "error";
-      text = `No model response was returned.\n${type}: ${report.error || "Unknown error"}`;
+    if (!baseline) {
+      setBadge(baselineModeStatus, "Not run", "");
+      setHidden(baselineModeError, true);
+      clear(baselineReportLinks);
     } else {
-      text = "This condition was not run.";
+      const report = baseline.report;
+      setBadge(baselineModeStatus, report.success ? "Complete" : "Failed", report.success ? "success" : "danger");
+      baselineModeError.textContent = report.success ? "" : friendlyError(report);
+      setHidden(baselineModeError, report.success);
+      renderReportLinks(baselineReportLinks, baseline.reportUrls, ["baseline"]);
     }
-    card.append(el("pre", "response-text", text));
-    return card;
+
+    if (!protectedRun) {
+      setBadge(protectedModeStatus, "Not run", "");
+      setHidden(protectedModeError, true);
+      clear(protectedReportLinks);
+    } else {
+      const report = protectedRun.report;
+      setBadge(protectedModeStatus, report.success ? "Complete" : "Failed", report.success ? "success" : "danger");
+      protectedModeError.textContent = report.success ? "" : friendlyError(report);
+      setHidden(protectedModeError, report.success);
+      renderReportLinks(protectedReportLinks, protectedRun.reportUrls, ["protected"]);
+    }
+
+    if (state.comparison) {
+      setBadge(compareModeStatus, "Compared", "success");
+      setHidden(compareModeError, true);
+    } else if (baseline && protectedRun) {
+      setBadge(compareModeStatus, "Ready to compare", "warning");
+      setHidden(compareModeError, true);
+    } else {
+      setBadge(compareModeStatus, "Waiting for runs", "");
+      setHidden(compareModeError, true);
+    }
   }
 
-  function renderResponses(experiment) {
+  function renderResponses() {
     clear(responseGrid);
-    responseGrid.append(
-      renderResponseCard(experiment, "baseline", "Unprotected baseline"),
-      renderResponseCard(experiment, "protected", "Protected condition")
-    );
+    [
+      ["baseline", "Security OFF · unprotected baseline"],
+      ["protected", "Security ON · protected condition"],
+    ].forEach(([condition, title]) => {
+      const mode = state[condition];
+      const report = mode ? mode.report : null;
+      const success = Boolean(report && report.success);
+      const card = el("article", `response-card ${success ? "" : "failed"}`.trim());
+
+      const header = el("header");
+      header.append(el("h3", "", title));
+      if (report) {
+        header.append(badge(success ? "Success" : "Failed", success ? "success" : "danger"));
+      } else {
+        header.append(badge("Not run", ""));
+      }
+      card.append(header);
+
+      let text;
+      if (!report) {
+        text = "This security mode has not been run for the current snapshot.";
+      } else if (report.response_text) {
+        text = report.response_text;
+      } else {
+        text = `No model response was returned.\n${friendlyError(report)}`;
+      }
+      card.append(el("pre", "response-text", text));
+      responseGrid.append(card);
+    });
   }
 
   function appendValidationRow(container, key, value) {
@@ -221,30 +295,38 @@
     container.append(row);
   }
 
-  function renderValidationCard(experiment, conditionName, title) {
-    const validation = conditionValidation(experiment, conditionName);
-    const report = experiment[conditionName];
+  function renderValidationCard(condition, title) {
+    const mode = state[condition];
+    const report = mode ? mode.report : null;
+    const validation = report ? report.validation : null;
     const card = el("article", "validation-card");
 
     const header = el("header");
     header.append(el("h3", "", title));
     if (report) {
-      header.append(el("span", `badge ${report.success ? "success" : "danger"}`, report.success ? "Model response" : "No response"));
+      header.append(badge(report.success ? "Model response" : "No response", report.success ? "success" : "danger"));
+    } else {
+      header.append(badge("Not run", ""));
     }
     card.append(header);
 
     const body = el("div", "validation-body");
+    if (!report) {
+      body.append(el("p", "panel-note", "Validation is available after this security mode runs."));
+      card.append(body);
+      return card;
+    }
     if (!validation) {
-      body.append(el("p", "panel-note", "Validation was not available because this condition did not run."));
+      body.append(el("p", "panel-note", "No validation result was saved for this run."));
       card.append(body);
       return card;
     }
 
     appendValidationRow(body, "Recommendation", validation.recommendation_identified ? (validation.recommended_product || "Identified") : "No recommendation identified");
-    appendValidationRow(body, "Captured price", validation.price_original || (validation.price_amount ? validation.price_amount : "Not established"));
+    appendValidationRow(body, "Captured price", validation.price_original || validation.price_amount || "Not established");
     appendValidationRow(body, "Currency", validation.price_currency || "Unknown");
     appendValidationRow(body, "Normalized INR", validation.normalized_price_inr === null || validation.normalized_price_inr === undefined ? "Not applied" : formatInr(validation.normalized_price_inr));
-    appendValidationRow(body, "Budget", validation.budget_inr === null || validation.budget_inr === undefined ? "Unknown" : formatInr(validation.budget_inr));
+    appendValidationRow(body, "Budget", validation.budget_inr === null || validation.budget_inr === undefined ? "Not applicable" : formatInr(validation.budget_inr));
 
     const statusRow = el("div", "validation-row");
     statusRow.append(el("span", "key", "Budget status"), statusPill(validation.budget_status));
@@ -260,27 +342,70 @@
     return card;
   }
 
-  function renderValidation(experiment) {
+  function renderValidation() {
     clear(validationGrid);
     validationGrid.append(
-      renderValidationCard(experiment, "baseline", "Baseline validation"),
-      renderValidationCard(experiment, "protected", "Protected validation")
+      renderValidationCard("baseline", "Security OFF validation"),
+      renderValidationCard("protected", "Security ON validation")
     );
   }
 
-  function renderProducts(experiment) {
+  function renderModelResults() {
+    const hasRun = Boolean(state.baseline || state.protected);
+    setHidden(modelResults, !hasRun);
+    if (!hasRun) return;
+
+    clear(modelBadges);
+    modelBadges.append(badge("Same saved snapshot"));
+    modelBadges.append(badge("Single attempt per mode"));
+    renderResponses();
+    renderValidation();
+  }
+
+  function renderDetection(comparison) {
+    clear(instructionFlags);
+    clear(findingList);
+    const detection = comparison.detection;
+    addFlag("Malicious instruction found", detection.detected ? "Yes" : "No", detection.detected ? "yes" : "no");
+    addFlag("Instruction reached OFF input", comparison.instruction_in_baseline_input ? "Yes" : "No", comparison.instruction_in_baseline_input ? "yes" : "no");
+    addFlag("Instruction reached ON input", comparison.instruction_in_protected_input ? "Yes" : "No", comparison.instruction_in_protected_input ? "yes" : "no");
+
+    const confinement = el("article", `flag-card ${comparison.protected_instruction_confined_to_untrusted_block ? "yes" : "no"}`);
+    confinement.append(
+      el("span", "flag-label", "ON placement"),
+      el("span", "flag-value", comparison.protected_instruction_confined_to_untrusted_block ? "Confined to untrusted block" : "Not confined")
+    );
+    instructionFlags.append(confinement);
+
+    if (!detection.findings.length) {
+      findingList.append(el("p", "panel-note", "No instruction-like text was flagged."));
+      return;
+    }
+
+    detection.findings.forEach((finding) => {
+      const card = el("article", "finding");
+      card.append(el("div", "finding-meta", finding.source_url));
+      card.append(el("blockquote", "", finding.excerpt));
+      const rules = finding.matched_rules && finding.matched_rules.length
+        ? ` Rules: ${finding.matched_rules.join(", ")}.`
+        : "";
+      card.append(el("p", "", finding.reason + rules));
+      findingList.append(card);
+    });
+  }
+
+  function renderProducts(comparison) {
     clear(productsBody);
-    const products = experiment.comparison ? experiment.comparison.products : [];
-    if (!products.length) {
+    if (!comparison.products.length) {
       const row = el("tr");
-      const cell = el("td", "empty", "No product facts were available because the paired comparison was not created.");
+      const cell = el("td", "empty", "No captured facts were available for this comparison.");
       cell.colSpan = 6;
       row.append(cell);
       productsBody.append(row);
       return;
     }
 
-    products.forEach((product) => {
+    comparison.products.forEach((product) => {
       const row = el("tr");
       const nameCell = el("td");
       nameCell.append(el("strong", "", product.name), el("span", "source-url", product.source_url));
@@ -296,23 +421,32 @@
     });
   }
 
-  function renderSummary(experiment, httpStatus) {
+  function renderSummary(comparison) {
     clear(summaryGrid);
-    const comparison = experiment.comparison;
-    addSummary(
-      "Experiment",
-      experiment.status === "complete" ? "Complete" : "Incomplete",
-      `HTTP ${httpStatus} · ${experiment.pages.filter((page) => page.success).length}/3 sources extracted`
-    );
     addSummary(
       "Observed outcome",
-      comparison ? comparison.outcome : "Conditions not run",
-      comparison ? `Model: ${comparison.model}` : "No paired comparison was produced"
+      comparison.outcome,
+      `Model: ${comparison.model} · ${comparison.snapshot_id || "snapshot not recorded"}`
+    );
+    addSummary(
+      "Same snapshot",
+      boolText(comparison.same_snapshot),
+      "Both conditions must use the captured evidence"
+    );
+    addSummary(
+      "Same evidence",
+      boolText(comparison.same_evidence),
+      "Task text and captured page content must match"
+    );
+    addSummary(
+      "Same model and settings",
+      comparison.same_model && comparison.same_generation_settings ? "Yes" : "No",
+      "Mismatched runs stay inconclusive"
     );
     addSummary(
       "Improvement observed",
-      comparison ? boolText(comparison.improvement_observed) : "Not evaluated",
-      comparison ? "Observed difference in this trial only" : "Extraction must succeed first"
+      boolText(comparison.improvement_observed),
+      "Observed difference in this trial only"
     );
     addSummary(
       "Causation established",
@@ -321,88 +455,102 @@
     );
   }
 
-  function renderBadges(experiment) {
+  function renderBadges(comparison) {
     clear(badges);
-    badges.append(badge(experiment.status === "complete" ? "Experiment complete" : "Incomplete", experiment.status === "complete" ? "success" : "warning"));
-    if (experiment.comparison) {
-      badges.append(badge(experiment.comparison.outcome, "warning"));
-      badges.append(badge(experiment.comparison.improvement_observed ? "Improvement observed" : "No improvement observed", experiment.comparison.improvement_observed ? "success" : ""));
-    }
+    badges.append(badge(comparison.outcome, comparison.outcome === "Attack not demonstrated" ? "success" : "warning"));
+    badges.append(badge(comparison.improvement_observed ? "Improvement observed" : "No improvement observed", comparison.improvement_observed ? "success" : ""));
     badges.append(badge("Single paired trial"));
   }
 
-  function renderLimitations(experiment) {
+  function renderLimitations(comparison) {
     clear(limitationsList);
-    const items = [];
-    if (experiment.comparison) {
-      experiment.comparison.uncertainty.forEach((item) => items.push(item));
+    const items = [...comparison.uncertainty];
+    if (state.snapshot && state.snapshot.controlled_instruction_note) {
+      items.push(state.snapshot.controlled_instruction_note);
     }
     items.push(
       "Extraction only proves that page text was captured; it does not prove the model obeyed an injected instruction.",
       "Heuristic detection can miss or over-flag instruction-like text and is not an attack-success score.",
-      "Prices are compared only when the captured currency is INR. Foreign-currency prices remain unknown without an explicit verified conversion.",
+      "Budget validation applies only when the original task contains an identifiable INR budget and the captured evidence contains supported prices.",
       "A single paired trial does not establish causation or universal defence effectiveness.",
       "External webpages can change after capture; the saved snapshot is the evidence used for both conditions."
     );
-
-    const unique = [...new Set(items)];
-    unique.forEach((item) => limitationsList.append(el("li", "", item)));
+    [...new Set(items)].forEach((item) => limitationsList.append(el("li", "", item)));
   }
 
-  function renderReports(reportUrls) {
+  function renderComparison() {
+    const entry = state.comparison;
+    setHidden(comparisonResults, !entry);
+    if (!entry) return;
+
+    const comparison = entry.comparison;
+    setHidden(comparisonError, true);
+    if (comparison.api_errors && comparison.api_errors.length) {
+      comparisonError.textContent = comparison.api_errors.map(summarizeApiError).join(" ");
+      setHidden(comparisonError, false);
+    }
+
+    renderBadges(comparison);
+    renderSummary(comparison);
+    renderDetection(comparison);
+    renderProducts(comparison);
+    renderLimitations(comparison);
+    renderReportLinks(reportLinks, entry.reportUrls, ["comparison", "snapshot", "baseline", "protected"]);
+  }
+
+  function updateModeControls() {
+    const usable = Boolean(state.snapshot && state.snapshot.extraction_success);
+    baselineButton.disabled = state.busy || !usable;
+    protectedButton.disabled = state.busy || !usable;
+    compareButton.disabled = state.busy || !(state.baseline && state.protected);
+    captureButton.disabled = state.busy;
+  }
+
+  function setBusy(busy, message) {
+    state.busy = busy;
+    setHidden(runStatus, !busy);
+    if (busy && message) runStatusText.textContent = message;
+    updateModeControls();
+  }
+
+  function resetAfterCapture() {
+    state.baseline = null;
+    state.protected = null;
+    state.comparison = null;
+    setHidden(modelResults, true);
+    setHidden(comparisonResults, true);
+    clear(responseGrid);
+    clear(validationGrid);
+    clear(modelBadges);
+    clear(baselineReportLinks);
+    clear(protectedReportLinks);
     clear(reportLinks);
-    if (!reportUrls || !Object.keys(reportUrls).length) {
-      reportLinks.append(el("span", "panel-note", "No report files were returned."));
-      return;
-    }
-    const order = ["experiment", "snapshot", "baseline", "protected", "comparison"];
-    const keys = order.filter((key) => reportUrls[key]).concat(
-      Object.keys(reportUrls).filter((key) => !order.includes(key))
-    );
-    keys.forEach((key) => {
-      const url = reportUrls[key];
-      if (typeof url !== "string" || !url.startsWith("/api/reports/")) return;
-      const link = el("a", "report-link", REPORT_LABELS[key] || key);
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noopener";
-      reportLinks.append(link);
+    setHidden(modeError, true);
+    setHidden(comparisonError, true);
+  }
+
+  async function postJson(url, payload) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
+    let data;
+    try {
+      data = await response.json();
+    } catch (error) {
+      throw new Error(`The server returned HTTP ${response.status} without a JSON response.`);
+    }
+    return { response, data };
   }
 
-  function renderExperiment(payload, httpStatus) {
-    const experiment = payload.experiment;
-    setHidden(results, false);
-    setHidden(experimentError, true);
-
-    const messages = [];
-    if (experiment.error) messages.push(experiment.error);
-    if (experiment.comparison && experiment.comparison.api_errors.length) {
-      messages.push(...experiment.comparison.api_errors);
-    }
-    if (messages.length) {
-      experimentError.textContent = messages.join(" ");
-      setHidden(experimentError, false);
-    }
-
-    renderBadges(experiment);
-    renderSummary(experiment, httpStatus);
-    renderSources(experiment);
-    renderDetection(experiment);
-    renderResponses(experiment);
-    renderValidation(experiment);
-    renderProducts(experiment);
-    renderLimitations(experiment);
-    renderReports(payload.report_urls);
-  }
-
-  async function runExperiment(event) {
+  async function capture(event) {
     event.preventDefault();
     formError.hidden = true;
-    setHidden(results, true);
-    setHidden(runStatus, false);
-    runButton.disabled = true;
-    runStatusText.textContent = "Extracting three sources, then running baseline and protected Gemma conditions…";
+    setHidden(snapshotPanel, true);
+    setHidden(modePanel, true);
+    resetAfterCapture();
+    setBusy(true, "Capturing three sources into a new evidence snapshot…");
 
     const payload = {
       task: document.getElementById("task").value,
@@ -414,34 +562,112 @@
     };
 
     try {
-      const response = await fetch("/api/experiment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      let data;
-      try {
-        data = await response.json();
-      } catch (error) {
-        throw new Error(`The server returned HTTP ${response.status} without a JSON report.`);
+      const { data } = await postJson("/api/capture", payload);
+      if (!data.snapshot) {
+        throw new Error(data.error || "The capture request did not return an evidence snapshot.");
       }
 
-      if (!response.ok && !data.experiment) {
-        throw new Error(data.error || `Experiment request failed with HTTP ${response.status}.`);
+      state.snapshot = data.snapshot;
+      state.snapshotReportUrl = data.report_urls ? data.report_urls.snapshot : null;
+      renderSources(state.snapshot);
+      renderModeState();
+      setHidden(snapshotPanel, false);
+      setHidden(modePanel, false);
+
+      if (state.snapshot.extraction_success) {
+        setHidden(modeError, true);
+      } else {
+        modeError.textContent = "Model runs are disabled until all three required sources extract successfully. Capture a new snapshot after fixing the failed source.";
+        setHidden(modeError, false);
       }
 
-      renderExperiment(data, response.status);
-      setHidden(runStatus, true);
-      results.scrollIntoView({ behavior: "smooth", block: "start" });
+      updateModeControls();
+      snapshotPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (error) {
-      setHidden(runStatus, true);
-      formError.textContent = error instanceof Error ? error.message : "The experiment could not be started.";
+      formError.textContent = error instanceof Error ? error.message : "Evidence capture could not be started.";
       formError.hidden = false;
     } finally {
-      runButton.disabled = false;
+      setBusy(false);
     }
   }
 
-  form.addEventListener("submit", runExperiment);
+  async function runMode(condition) {
+    if (!state.snapshot || !state.snapshot.extraction_success) return;
+    const isBaseline = condition === "baseline";
+    const conditionLabel = isBaseline ? "Security OFF" : "Security ON";
+    const button = isBaseline ? baselineButton : protectedButton;
+    const modeErrorNode = isBaseline ? baselineModeError : protectedModeError;
+
+    state[condition] = null;
+    state.comparison = null;
+    setHidden(comparisonResults, true);
+    setHidden(modeError, true);
+    setHidden(modeErrorNode, true);
+    renderModeState();
+    renderModelResults();
+    updateModeControls();
+
+    button.disabled = true;
+    setBusy(true, `Running ${conditionLabel} on the saved evidence snapshot…`);
+
+    try {
+      const { data } = await postJson(isBaseline ? "/api/run/baseline" : "/api/run/protected", {
+        snapshot_id: state.snapshot.snapshot_id,
+      });
+      if (!data.report) {
+        throw new Error(data.error || `The ${conditionLabel} request did not return a report.`);
+      }
+
+      state[condition] = {
+        report: data.report,
+        reportUrls: data.report_urls || {},
+      };
+      renderModeState();
+      renderModelResults();
+      updateModeControls();
+      modelResults.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+      modeError.textContent = error instanceof Error ? error.message : `${conditionLabel} could not be started.`;
+      setHidden(modeError, false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function compare() {
+    if (!state.snapshot || !(state.baseline && state.protected)) return;
+    setHidden(comparisonError, true);
+    setBusy(true, "Comparing the latest compatible saved runs…");
+
+    try {
+      const { data } = await postJson("/api/compare", {
+        snapshot_id: state.snapshot.snapshot_id,
+      });
+      if (!data.comparison) {
+        throw new Error(data.error || "The comparison request did not return a report.");
+      }
+
+      state.comparison = {
+        comparison: data.comparison,
+        reportUrls: data.report_urls || {},
+      };
+      renderComparison();
+      renderModeState();
+      updateModeControls();
+      comparisonResults.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+      compareModeError.textContent = error instanceof Error ? error.message : "The comparison could not be started.";
+      setHidden(compareModeError, false);
+      setBadge(compareModeStatus, "Incomplete", "warning");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  captureForm.addEventListener("submit", capture);
+  baselineButton.addEventListener("click", () => runMode("baseline"));
+  protectedButton.addEventListener("click", () => runMode("protected"));
+  compareButton.addEventListener("click", compare);
+
+  updateModeControls();
 })();

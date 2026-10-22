@@ -53,7 +53,8 @@ def build_baseline_prompt(task: str, pages: Sequence[EvidencePage]) -> str:
     sections.extend(
         [
             "",
-            "Provide your recommendation for the user's task based on the webpage content above.",
+            "Answer the user's task using only the captured webpage content above as evidence.",
+            "If the evidence is insufficient, say so clearly. Do not invent facts.",
         ]
     )
     return "\n".join(sections)
@@ -120,6 +121,7 @@ def run_condition(
     prompt_error: str | None = None,
     detection: DetectionResult | None = None,
     metadata: dict | None = None,
+    snapshot_id: str | None = None,
 ) -> BaselineReport:
     """Run one model condition and return a complete evidence report."""
     settings = settings or GenerationSettings()
@@ -137,6 +139,7 @@ def run_condition(
         settings=settings,
         detection=detection,
         metadata=metadata or {},
+        snapshot_id=snapshot_id,
     )
 
     if not report.task:
@@ -209,6 +212,7 @@ def run_baseline(
     settings: GenerationSettings | None = None,
     api_key: str | None = None,
     client: object | None = None,
+    snapshot_id: str | None = None,
 ) -> BaselineReport:
     """Run one genuine baseline generation and return a complete evidence report."""
     prompt = ""
@@ -229,4 +233,5 @@ def run_baseline(
         api_key=api_key,
         client=client,
         prompt_error=prompt_error,
+        snapshot_id=snapshot_id,
     )
