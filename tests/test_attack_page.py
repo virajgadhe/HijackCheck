@@ -27,7 +27,7 @@ def live_server():
         thread.join(timeout=5)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def chromium():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
@@ -57,7 +57,7 @@ def test_attack_page_is_served_with_injection():
 
 
 def test_playwright_extracts_rendered_attack_page(live_server):
-    result = extract_page(f"{live_server}/lab/attack-page")
+    result = extract_page(f"{live_server}/lab/attack-page", allow_private=True)
 
     assert result.success, result.error
     assert result.error is None
