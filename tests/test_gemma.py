@@ -178,7 +178,34 @@ def test_server_error_is_classified():
     )
 
     assert report.success is False
+    assert report.response_text is None
     assert report.error_type == "api_server_error"
+    attempts = report.response_diagnostics["attempts"]
+    assert attempts[0]["http_status"] == 500
+    assert attempts[0]["retryable"] is True
+    assert attempts[0]["outcome"] == "error"
+
+
+def test_persistent_server_error_remains_a_failure(monkeypatch):
+    monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
+    exception = errors.ServerError(
+        500,
+        {"error": {"code": 500, "status": "INTERNAL", "message": "API failure"}},
+    )
+    client = SequenceClient([exception, exception])
+
+    report = run_baseline(TASK, make_pages(), api_key="test-key", client=client)
+
+    assert report.success is False
+    assert report.response_text is None
+    assert report.error_type == "api_server_error"
+    assert report.attempts == 2
+    assert report.retried is True
+    assert report.retry_reasons == ["api_server_error"]
+    attempts = report.response_diagnostics["attempts"]
+    assert [item["http_status"] for item in attempts] == [500, 500]
+    assert all(item["retryable"] is True for item in attempts)
+    assert report.response_diagnostics["request_timeout_ms"] == 90_000
 
 
 def test_network_error_is_classified():

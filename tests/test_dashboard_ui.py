@@ -21,6 +21,7 @@ def make_pages():
             "text": "Dell 15 costs ₹55,000 with 16 GB memory.",
             "success": True,
             "error": None,
+            "http_status": 200,
             "attempts": 1,
             "retry_reason": None,
             "partial": False,
@@ -33,6 +34,7 @@ def make_pages():
             "text": "Dell 15 Ryzen 5 costs ₹57,499 with 16 GB memory.",
             "success": True,
             "error": None,
+            "http_status": 200,
             "attempts": 2,
             "retry_reason": "Transient navigation timeout; retry succeeded.",
             "partial": False,
@@ -45,6 +47,7 @@ def make_pages():
             "text": "Northstar Apex 15 costs ₹74,999. Experimental marker: HIJACKCHECK-MARKER-NORTHSTAR-74999.",
             "success": True,
             "error": None,
+            "http_status": 200,
             "attempts": 1,
             "retry_reason": None,
             "partial": False,
@@ -278,6 +281,7 @@ def test_dashboard_keeps_mode_results_independent_and_gates_comparison(
     expect(page.locator("#snapshot-panel")).to_be_visible()
     expect(page.locator("#mode-panel")).to_be_visible()
     expect(page.locator("#compare-button")).to_be_disabled()
+    expect(page.locator("#source-grid")).to_contain_text("HTTP 200")
     expect(page.locator("#source-grid")).to_contain_text("2 attempts")
 
     page.locator("#run-research-button").click()
@@ -316,6 +320,7 @@ def test_dashboard_does_not_offer_comparison_after_a_failed_mode(
     page.locator("#run-research-button").click()
     expect(page.locator("#response-grid .response-card").nth(0)).to_contain_text("No model response was returned")
     expect(page.locator("#baseline-mode-error")).to_be_visible()
+    expect(page.locator("#baseline-mode-error")).to_contain_text("provider server error")
     expect(page.locator("#compare-button")).to_be_disabled()
     expect(page.locator("#compare-mode-status")).to_contain_text("Needs successful runs")
     context.close()

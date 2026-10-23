@@ -33,6 +33,7 @@ def evidence_sha256(pages) -> str:
             "text": page.text,
             "success": page.success,
             "error": page.error,
+            "http_status": page.http_status,
         }
         for page in pages
     ]

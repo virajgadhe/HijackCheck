@@ -145,7 +145,7 @@ def test_index_renders_working_form_without_secret(tmp_path):
     assert 'id="comparison-results"' in html
     assert 'id="run-baseline-button"' not in html
     assert 'id="run-protected-button"' not in html
-    assert "Can a hidden webpage instruction change a budget-conscious laptop recommendation?" in html
+    assert "Can an embedded webpage instruction change a budget-conscious laptop recommendation?" in html
     assert "Resource 1" in html
     assert "Resource 2" in html
     assert "Resource 3" in html

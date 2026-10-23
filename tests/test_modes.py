@@ -8,13 +8,14 @@ from google.genai import errors
 
 from app import create_app
 from app import routes as routes_module
-from app.schemas import GenerationSettings
+from app.schemas import BaselineReport, GenerationSettings
 from app.security.url_policy import URLPolicyError
 from app.services import experiment as experiment_module
 from app.services.evaluation import compare_conditions
 from app.services.experiment import (
     MissingConditionRunError,
     SnapshotNotUsableError,
+    _condition_status,
     capture_evidence,
     compare_saved_snapshot,
     run_saved_condition,
@@ -187,6 +188,25 @@ def test_capture_saves_snapshot_without_model_runs(tmp_path, monkeypatch):
     assert len(list(tmp_path.glob("*.json"))) == 1
     assert not list(tmp_path.glob("baseline-*.json"))
     assert not list(tmp_path.glob("protected-*.json"))
+
+
+def test_provider_failure_status_codes_are_distinct():
+    def report(error_type):
+        return BaselineReport(
+            run_id="run-test",
+            condition="baseline",
+            created_at="2026-10-23T00:00:00+00:00",
+            model=MODEL,
+            task=BUDGET_TASK,
+            pages=[],
+            settings=GenerationSettings(),
+            success=False,
+            error_type=error_type,
+        )
+
+    assert _condition_status(report("api_server_error")) == 502
+    assert _condition_status(report("quota_error")) == 429
+    assert _condition_status(report("missing_api_key")) == 503
 
 
 def test_security_off_runs_only_baseline(tmp_path, monkeypatch):

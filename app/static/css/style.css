@@ -34,6 +34,20 @@ a {
   margin: 0 auto;
 }
 
+.fixture-banner {
+  margin-top: 1.5rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid #31435f;
+  border-radius: 10px;
+  background: #0d1520;
+  color: #b9cbe8;
+  font-size: 0.82rem;
+}
+
+.fixture-banner strong {
+  color: #dce9ff;
+}
+
 .site-header {
   position: sticky;
   top: 0;

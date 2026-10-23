@@ -25,6 +25,7 @@ from app.services.experiment import (
 from app.services.extraction import extract_page
 from app.services.fixture import (
     ATTACK_MARKER,
+    ATTACK_NOTE,
     DEFAULT_RESOURCE_URLS,
     DEFAULT_TASK,
 )
@@ -59,7 +60,11 @@ def health():
 
 @main.get("/lab/attack-page")
 def attack_page():
-    return render_template("lab/attack_page.html", attack_marker=ATTACK_MARKER)
+    return render_template(
+        "lab/attack_page.html",
+        attack_marker=ATTACK_MARKER,
+        attack_note=ATTACK_NOTE,
+    )
 
 
 def _report_url(filename: str) -> str:

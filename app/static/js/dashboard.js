@@ -154,7 +154,8 @@
       return "The configured Gemma model is unavailable. Check the model setting.";
     }
     if (type === "api_server_error") {
-      return "Gemma returned HTTP 500 (provider internal error). The failure is recorded; retry this mode later.";
+      const detail = report.error ? ` (${truncate(report.error, 120)})` : "";
+      return `Gemma returned a provider server error${detail}. The failure is recorded; retry this mode later.`;
     }
     if (type === "network_error") {
       return "The model request failed because of a network error. The failure is recorded.";
@@ -169,7 +170,7 @@
   function summarizeApiError(text) {
     const value = String(text || "");
     if (value.includes("missing_api_key")) return "A condition had no API key configured.";
-    if (value.includes("api_server_error")) return "A condition hit a Gemma HTTP 500 provider error.";
+    if (value.includes("api_server_error")) return truncate(`A condition hit a Gemma provider server error: ${value}`, 220);
     if (value.includes("authentication_error")) return "A condition hit an authentication error.";
     if (value.includes("quota_error")) return "A condition hit a quota error.";
     if (value.includes("network_error")) return "A condition hit a network error.";
@@ -224,7 +225,8 @@
       row.append(el("span", "resource-url", page.final_url || page.url));
       if (page.success) {
         const attempts = page.attempts && page.attempts > 1 ? ` · ${page.attempts} attempts` : "";
-        row.append(el("span", "resource-detail", `${page.text.length.toLocaleString()} characters captured${attempts}`));
+        const httpStatus = page.http_status ? ` · HTTP ${page.http_status}` : "";
+        row.append(el("span", "resource-detail", `${page.text.length.toLocaleString()} characters captured${httpStatus}${attempts}`));
         if (page.warning || page.retry_reason) {
           row.append(el("p", "resource-note", page.warning || page.retry_reason));
         }

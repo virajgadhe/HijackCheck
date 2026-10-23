@@ -31,6 +31,7 @@ class ExtractionResult(BaseModel):
     body_text: str = ""
     success: bool = False
     error: str | None = None
+    http_status: int | None = None
     attempts: int = 1
     retry_reason: str | None = None
     partial: bool = False
@@ -39,6 +40,10 @@ class ExtractionResult(BaseModel):
 
 class _ContentError(Exception):
     """Raised when navigation succeeded but usable page text was not obtained."""
+
+    def __init__(self, message: str, *, http_status: int | None = None):
+        super().__init__(message)
+        self.http_status = http_status
 
 
 def _looks_like_error_page(title: str, text: str) -> bool:
@@ -74,13 +79,17 @@ def _capture_once(
         browser = playwright.chromium.launch(headless=True)
         try:
             page = browser.new_page()
+            navigation_response = None
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                navigation_response = page.goto(
+                    url, wait_until="domcontentloaded", timeout=timeout_ms
+                )
             except PlaywrightTimeoutError as exc:
                 timed_out = True
                 navigation_error = _error_preview(exc)
 
             result.final_url = page.url or ""
+            result.http_status = getattr(navigation_response, "status", None)
             if not result.final_url or result.final_url in {
                 "about:blank",
                 "chrome-error://chromewebdata/",
@@ -89,6 +98,13 @@ def _capture_once(
                     f"Timed out after {timeout_ms} ms and no navigable page URL was available."
                 )
             validate_url(result.final_url, allow_private=allow_private)
+
+            if result.http_status is not None and result.http_status >= 400:
+                raise _ContentError(
+                    f"Rendered page returned HTTP {result.http_status}; "
+                    "the captured content is not treated as usable evidence.",
+                    http_status=result.http_status,
+                )
 
             try:
                 result.title = page.title()
@@ -113,7 +129,8 @@ def _capture_once(
             if _looks_like_error_page(result.title, text):
                 raise _ContentError(
                     "Rendered page appears to be an access-denied or error page; "
-                    "the captured text is not treated as usable evidence."
+                    "the captured text is not treated as usable evidence.",
+                    http_status=result.http_status,
                 )
 
             result.body_text = text
@@ -166,6 +183,8 @@ def extract_page(
             last_reason = _error_preview(exc)
             result.attempts = attempt
             result.error = last_reason
+            if exc.http_status is not None:
+                result.http_status = exc.http_status
         except PlaywrightTimeoutError as exc:
             last_reason = f"Timed out after {attempt_timeout} ms: {_error_preview(exc)}"
             result.attempts = attempt

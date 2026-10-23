@@ -78,6 +78,15 @@ def _safe_error(exc: Exception, api_key: str | None) -> str:
     return message[:MAX_ERROR_LENGTH]
 
 
+def _error_http_status(exc: Exception) -> int | None:
+    code = getattr(exc, "code", None)
+    if isinstance(code, int):
+        return code
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
 def _classify_error(exc: Exception) -> str:
     if isinstance(exc, errors.ClientError):
         code = getattr(exc, "code", None)
@@ -297,6 +306,8 @@ def run_condition(
                     "outcome": "error",
                     "error_type": error_type,
                     "exception": type(exc).__name__,
+                    "http_status": _error_http_status(exc),
+                    "retryable": error_type in RETRYABLE_ERROR_TYPES,
                     "elapsed_ms": round((time.monotonic() - started) * 1000),
                 }
             )

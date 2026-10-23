@@ -10,6 +10,7 @@ class EvidencePage(BaseModel):
     text: str = ""
     success: bool = True
     error: str | None = None
+    http_status: int | None = None
     attempts: int = 1
     retry_reason: str | None = None
     partial: bool = False

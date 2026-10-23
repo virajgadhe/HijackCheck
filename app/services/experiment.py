@@ -123,6 +123,8 @@ def _condition_error(report: BaselineReport) -> str:
 def _condition_status(report: BaselineReport) -> int:
     if report.success:
         return 200
+    if report.error_type == "quota_error":
+        return 429
     if report.error_type in {"missing_api_key", "configuration_error"}:
         return 503
     return 502
@@ -169,6 +171,7 @@ def _extract_pages(
                 text=result.body_text,
                 success=result.success,
                 error=result.error,
+                http_status=getattr(result, "http_status", None),
                 attempts=getattr(result, "attempts", 1),
                 retry_reason=getattr(result, "retry_reason", None),
                 partial=getattr(result, "partial", False),
@@ -467,6 +470,10 @@ def run_experiment(
             report.error_type == "missing_api_key" for report in (baseline, protected)
         ):
             status_code = 503
+        elif any(
+            report.error_type == "quota_error" for report in (baseline, protected)
+        ):
+            status_code = 429
         else:
             status_code = 502
 
