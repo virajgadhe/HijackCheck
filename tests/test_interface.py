@@ -140,6 +140,7 @@ def test_index_renders_working_form_without_secret(tmp_path):
     assert 'id="real-url-1"' in html
     assert 'id="real-url-2"' in html
     assert 'id="attack-url"' in html
+    assert 'id="attack-variant"' in html
     assert 'id="snapshot-panel"' in html
     assert 'id="model-results"' in html
     assert 'id="comparison-results"' in html
@@ -149,6 +150,9 @@ def test_index_renders_working_form_without_secret(tmp_path):
     assert "Resource 1" in html
     assert "Resource 2" in html
     assert "Resource 3" in html
+    assert "Visible" in html
+    assert "Hidden" in html
+    assert "Control" in html
     assert "Security OFF" in html
     assert "Security ON" in html
     assert "Capture saves evidence only" in html

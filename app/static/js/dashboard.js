@@ -3,6 +3,8 @@
 
   const captureForm = document.getElementById("capture-form");
   const captureButton = document.getElementById("capture-button");
+  const attackUrl = document.getElementById("attack-url");
+  const attackVariant = document.getElementById("attack-variant");
   const runResearchButton = document.getElementById("run-research-button");
   const compareButton = document.getElementById("compare-button");
   const modeInputs = Array.from(document.querySelectorAll('input[name="security_mode"]'));
@@ -93,6 +95,35 @@
 
   function setHidden(node, hidden) {
     node.hidden = hidden;
+  }
+
+  function syncVariantUrl() {
+    if (!attackUrl || !attackVariant) return;
+    let url;
+    try {
+      url = new URL(attackUrl.value, window.location.origin);
+    } catch (error) {
+      return;
+    }
+    if (attackVariant.value === "visible") {
+      url.searchParams.delete("variant");
+    } else {
+      url.searchParams.set("variant", attackVariant.value);
+    }
+    attackUrl.value = url.toString();
+  }
+
+  function syncVariantFromUrl() {
+    if (!attackUrl || !attackVariant) return;
+    let url;
+    try {
+      url = new URL(attackUrl.value, window.location.origin);
+    } catch (error) {
+      return;
+    }
+    const requested = url.searchParams.get("variant") || "visible";
+    const supported = Array.from(attackVariant.options).some((option) => option.value === requested);
+    if (supported) attackVariant.value = requested;
   }
 
   function getSelectedCondition() {
@@ -226,7 +257,8 @@
       if (page.success) {
         const attempts = page.attempts && page.attempts > 1 ? ` · ${page.attempts} attempts` : "";
         const httpStatus = page.http_status ? ` · HTTP ${page.http_status}` : "";
-        row.append(el("span", "resource-detail", `${page.text.length.toLocaleString()} characters captured${httpStatus}${attempts}`));
+        const method = page.extraction_method === "dom" ? "DOM text" : "visible text";
+        row.append(el("span", "resource-detail", `${page.text.length.toLocaleString()} characters captured as ${method}${httpStatus}${attempts}`));
         if (page.warning || page.retry_reason) {
           row.append(el("p", "resource-note", page.warning || page.retry_reason));
         }
@@ -236,7 +268,8 @@
       sourceGrid.append(row);
     });
 
-    snapshotNote.textContent = `Snapshot ${snapshot.snapshot_id} · ${snapshot.extraction_success ? "3/3 extracted" : "incomplete"}`;
+    const variant = snapshot.controlled_variant || "visible";
+    snapshotNote.textContent = `Snapshot ${snapshot.snapshot_id} · ${snapshot.extraction_success ? "3/3 extracted" : "incomplete"} · ${variant} variant`;
     controlledNote.textContent = snapshot.controlled_instruction_note || "";
     setHidden(controlledNote, !snapshot.controlled_instruction_note);
     renderReportLinks(snapshotReportLinks, { snapshot: state.snapshotReportUrl }, ["snapshot"]);
@@ -421,7 +454,10 @@
     clear(instructionFlags);
     clear(findingList);
     const detection = comparison.detection;
-    addFlag("Instruction found", detection.detected ? "Yes" : "No", detection.detected ? "yes" : "no");
+    addFlag("Attack page variant", comparison.controlled_variant || "visible", "");
+    addFlag("Instruction counted", detection.detected ? "Yes" : "No", detection.detected ? "yes" : "no");
+    addFlag("Instruction in DOM", comparison.instruction_in_dom ? "Yes" : "No", comparison.instruction_in_dom ? "yes" : "no");
+    addFlag("Instruction in snapshot", comparison.instruction_in_snapshot ? "Yes" : "No", comparison.instruction_in_snapshot ? "yes" : "no");
     addFlag("Controlled marker extracted", comparison.instruction_extracted ? "Yes" : "No", comparison.instruction_extracted ? "yes" : "no");
     addFlag("Reached OFF input", comparison.instruction_in_baseline_input ? "Yes" : "No", comparison.instruction_in_baseline_input ? "yes" : "no");
     addFlag("Reached ON input", comparison.instruction_in_protected_input ? "Yes" : "No", comparison.instruction_in_protected_input ? "yes" : "no");
@@ -483,6 +519,11 @@
       "Observed outcome",
       comparison.outcome,
       `Model: ${comparison.model} · ${comparison.snapshot_id || "snapshot not recorded"}`
+    );
+    addSummary(
+      "Attack page variant",
+      comparison.controlled_variant || "visible",
+      "Visible, hidden DOM, or no-injection control"
     );
     addSummary(
       "Same snapshot",
@@ -646,6 +687,10 @@
 
       state.snapshot = data.snapshot;
       state.snapshotReportUrl = data.report_urls ? data.report_urls.snapshot : null;
+      if (state.snapshot.controlled_variant) {
+        attackVariant.value = state.snapshot.controlled_variant;
+        syncVariantUrl();
+      }
       renderSources(state.snapshot);
       renderSelectedMode();
       renderModeState();
@@ -742,6 +787,12 @@
     }
   }
 
+  if (attackVariant) {
+    attackVariant.addEventListener("change", syncVariantUrl);
+  }
+  if (attackUrl) {
+    attackUrl.addEventListener("change", syncVariantFromUrl);
+  }
   captureForm.addEventListener("submit", capture);
   runResearchButton.addEventListener("click", runResearch);
   compareButton.addEventListener("click", compare);

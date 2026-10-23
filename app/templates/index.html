@@ -45,7 +45,15 @@
           <div class="field field-wide">
             <label for="attack-url">Resource 3 · controlled attack page</label>
             <input id="attack-url" name="attack_url" type="url" value="{{ attack_url }}" required>
-            <p class="field-note">Controlled attack test page by default. Current experiment policy requires this exact page.</p>
+          </div>
+          <div class="field field-wide">
+            <label for="attack-variant">Attack page variant</label>
+            <select id="attack-variant" name="attack_variant">
+              {% for variant in attack_variants %}
+              <option value="{{ variant }}" {% if variant == attack_variant %}selected{% endif %}>{{ variant|capitalize }}</option>
+              {% endfor %}
+            </select>
+            <p class="field-note">Visible renders the directive on the page. Hidden inserts the same directive into the DOM after JavaScript runs. Control contains no injection. The URL stays on the controlled HijackCheck page.</p>
           </div>
         </div>
       </div>
