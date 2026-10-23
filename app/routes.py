@@ -9,7 +9,7 @@ from flask import (
     url_for,
 )
 
-from app.schemas import EvidencePage
+from app.schemas import EvidencePage, GenerationSettings
 from app.security.url_policy import URLPolicyError, validate_url
 from app.services.experiment import (
     ExperimentValidationError,
@@ -23,15 +23,16 @@ from app.services.experiment import (
     run_saved_condition,
 )
 from app.services.extraction import extract_page
-from app.services.gemma import DEFAULT_TASK, run_baseline
+from app.services.fixture import (
+    ATTACK_MARKER,
+    DEFAULT_RESOURCE_URLS,
+    DEFAULT_TASK,
+)
+from app.services.gemma import run_baseline
 from app.services.reporting import save_report
 
 main = Blueprint("main", __name__)
 
-DEMO_PRODUCT_URLS = (
-    "https://system76.com/laptops/lemur-pro",
-    "https://system76.com/laptops/darter-pro",
-)
 REPORT_FILENAME = re.compile(r"^[A-Za-z0-9._-]+\.json$")
 
 
@@ -44,8 +45,8 @@ def index():
     return render_template(
         "index.html",
         default_task=DEFAULT_TASK,
-        product_url_1=DEMO_PRODUCT_URLS[0],
-        product_url_2=DEMO_PRODUCT_URLS[1],
+        resource_url_1=DEFAULT_RESOURCE_URLS[0],
+        resource_url_2=DEFAULT_RESOURCE_URLS[1],
         attack_url=_controlled_url(),
         api_key_configured=bool(current_app.config["GOOGLE_API_KEY"]),
     )
@@ -58,7 +59,7 @@ def health():
 
 @main.get("/lab/attack-page")
 def attack_page():
-    return render_template("lab/attack_page.html")
+    return render_template("lab/attack_page.html", attack_marker=ATTACK_MARKER)
 
 
 def _report_url(filename: str) -> str:
@@ -103,6 +104,13 @@ def capture():
     )
 
 
+def _generation_settings() -> GenerationSettings:
+    return GenerationSettings(
+        max_output_tokens=int(current_app.config["GEMMA_MAX_OUTPUT_TOKENS"]),
+        thinking_level=current_app.config["GEMMA_THINKING_LEVEL"],
+    )
+
+
 def _run_mode(condition: str):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -114,6 +122,7 @@ def _run_mode(condition: str):
             snapshot_id,
             condition,
             model=current_app.config["GEMMA_MODEL"],
+            settings=_generation_settings(),
             api_key=current_app.config["GOOGLE_API_KEY"],
             runs_dir=current_app.config["RUNS_DIR"],
         )
@@ -198,6 +207,7 @@ def experiment():
             urls,
             controlled_url=_controlled_url(),
             model=current_app.config["GEMMA_MODEL"],
+            settings=_generation_settings(),
             api_key=current_app.config["GOOGLE_API_KEY"],
             runs_dir=current_app.config["RUNS_DIR"],
             extraction_timeout_ms=int(current_app.config["EXTRACTION_TIMEOUT_MS"]),
@@ -266,6 +276,10 @@ def baseline():
                 text=result.body_text,
                 success=result.success,
                 error=result.error,
+                attempts=result.attempts,
+                retry_reason=result.retry_reason,
+                partial=result.partial,
+                warning=result.warning,
             )
         )
 
@@ -273,6 +287,7 @@ def baseline():
         task,
         pages,
         model=current_app.config["GEMMA_MODEL"],
+        settings=_generation_settings(),
         api_key=current_app.config["GOOGLE_API_KEY"],
     )
     report_path = save_report(report, current_app.config["RUNS_DIR"])

@@ -169,6 +169,10 @@ def _extract_pages(
                 text=result.body_text,
                 success=result.success,
                 error=result.error,
+                attempts=getattr(result, "attempts", 1),
+                retry_reason=getattr(result, "retry_reason", None),
+                partial=getattr(result, "partial", False),
+                warning=getattr(result, "warning", None),
             )
         )
     return pages

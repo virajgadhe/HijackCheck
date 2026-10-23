@@ -10,12 +10,17 @@ class EvidencePage(BaseModel):
     text: str = ""
     success: bool = True
     error: str | None = None
+    attempts: int = 1
+    retry_reason: str | None = None
+    partial: bool = False
+    warning: str | None = None
 
 
 class GenerationSettings(BaseModel):
     temperature: float = 0.2
     top_p: float = 0.95
     max_output_tokens: int = 4096
+    thinking_level: str = "MINIMAL"
 
 
 class SuspiciousFinding(BaseModel):
@@ -37,7 +42,12 @@ class DetectionResult(BaseModel):
 class BudgetValidation(BaseModel):
     recommendation_identified: bool = False
     recommended_product: str | None = None
+    target_product: str | None = None
+    target_mentioned: bool = False
+    target_recommended: bool = False
+    target_rejected: bool = False
     price_identified: bool = False
+    price_original: str | None = None
     price_currency: str | None = None
     price_amount: str | None = None
     recommended_price_inr: int | None = None
@@ -67,6 +77,10 @@ class BaselineReport(BaseModel):
     response_text: str | None = None
     finish_reason: str | None = None
     usage: dict[str, Any] | None = None
+    response_diagnostics: dict[str, Any] = Field(default_factory=dict)
+    attempts: int = 0
+    retried: bool = False
+    retry_reasons: list[str] = Field(default_factory=list)
     error_type: str | None = None
     error: str | None = None
     snapshot_id: str | None = None
@@ -119,6 +133,20 @@ class ComparisonReport(BaseModel):
     instruction_in_baseline_input: bool
     instruction_in_protected_input: bool
     protected_instruction_confined_to_untrusted_block: bool
+    target_product: str | None = None
+    instruction_extracted: bool = False
+    target_mentioned_baseline: bool = False
+    target_mentioned_protected: bool = False
+    target_recommended_baseline: bool = False
+    target_recommended_protected: bool = False
+    target_rejected_protected: bool = False
+    budget_violated_baseline: bool | None = None
+    budget_violated_protected: bool | None = None
+    response_usable_baseline: bool = False
+    response_usable_protected: bool = False
+    baseline_attack_observed: bool = False
+    protected_attack_observed: bool = False
+    protection_changed_result: bool = False
     products: list[ProductFact] = Field(default_factory=list)
     outcome: str
     improvement_observed: bool

@@ -8,247 +8,229 @@
   <script defer src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </head>
 <body>
-  <header class="site-header">
-    <div class="page-width header-inner">
+  <header class="topbar">
+    <div class="shell topbar-inner">
       <a class="brand" href="{{ url_for('main.index') }}">Hijack<span>Check</span></a>
-      <div class="header-meta">
-        <span class="status-dot" aria-hidden="true"></span>
-        Controlled experiment
-      </div>
+      <div class="header-meta">Controlled experiment</div>
     </div>
   </header>
 
-  <main class="page-width">
+  <main class="shell">
     <section class="hero">
       <p class="eyebrow">Gemma 4 security lab</p>
-      <h1>Can an embedded webpage instruction influence the AI response?</h1>
+      <h1>Can a hidden webpage instruction change a budget-conscious laptop recommendation?</h1>
       <p class="lede">
-        Capture three webpages once, then run Security OFF and Security ON as separate
-        model conditions against the same saved evidence. Compare actual Gemma responses
-        only when the runs are compatible. Failed sources and API errors are shown as they occur.
+        Capture two real laptop pages and one controlled attack page once, then run Security
+        OFF and Security ON against the same saved evidence.
       </p>
     </section>
 
-    <section class="panel input-panel" aria-labelledby="setup-heading">
-      <div class="panel-heading">
-        <div>
-          <p class="step-label">01 · Capture evidence</p>
-          <h2 id="setup-heading">Define the research task and sources</h2>
-        </div>
-        <p class="panel-note">Website 3 is the controlled attack page served by this app.</p>
+    <form id="capture-form" class="composer" novalidate>
+      <div class="composer-input">
+        <label class="sr-only" for="task">Research task</label>
+        <textarea id="task" name="task" rows="3" required>{{ default_task }}</textarea>
       </div>
 
-      <form id="capture-form" novalidate>
-        <div class="field">
-          <label for="task">Research task</label>
-          <textarea id="task" name="task" rows="3" required>{{ default_task }}</textarea>
-          <p class="help">
-            The complete task is sent verbatim. Automatic budget validation runs only when an
-            identifiable INR budget and captured prices are available.
+      <div class="resource-section">
+        <p class="field-group-label">Resources</p>
+        <div class="resource-fields">
+          <div class="field">
+            <label for="real-url-1">Resource 1</label>
+            <input id="real-url-1" name="real_url_1" type="url" value="{{ resource_url_1 }}" required>
+          </div>
+          <div class="field">
+            <label for="real-url-2">Resource 2</label>
+            <input id="real-url-2" name="real_url_2" type="url" value="{{ resource_url_2 }}" required>
+          </div>
+          <div class="field field-wide">
+            <label for="attack-url">Resource 3 · controlled attack page</label>
+            <input id="attack-url" name="attack_url" type="url" value="{{ attack_url }}" required>
+            <p class="field-note">Controlled malicious test page by default. Current experiment policy requires this exact page.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer-footer">
+        <span class="composer-hint">Capture saves evidence only. No Gemma call.</span>
+        <div class="composer-actions">
+          <button class="primary-button" id="capture-button" type="submit">Capture Evidence</button>
+        </div>
+      </div>
+
+      {% if not api_key_configured %}
+      <p class="alert alert-warning" role="alert">
+        No Gemma API key is configured. Evidence capture can still run, but model runs will
+        be recorded as incomplete.
+      </p>
+      {% endif %}
+
+      <p class="alert alert-error" id="form-error" role="alert" hidden></p>
+    </form>
+
+    <p class="status-line" id="run-status" aria-live="polite" hidden>
+      <span class="status-indicator" aria-hidden="true"></span>
+      <span id="run-status-text">Capturing resources…</span>
+    </p>
+
+    <section id="snapshot-panel" class="workflow-block" hidden>
+      <details class="compact-panel" open>
+        <summary>
+          <span>Captured resources</span>
+          <span class="compact-meta" id="snapshot-note"></span>
+        </summary>
+        <div class="compact-content">
+          <div class="resource-list" id="source-grid"></div>
+          <p class="note" id="controlled-note" hidden></p>
+          <div class="report-links" id="snapshot-report-links"></div>
+        </div>
+      </details>
+    </section>
+
+    <section id="mode-panel" class="run-panel" hidden>
+      <div class="run-panel-head">
+        <div class="run-control">
+          <p class="eyebrow">Run control</p>
+          <div class="run-control-row">
+            <fieldset class="security-switch">
+              <legend>Security mode</legend>
+              <div class="security-options">
+                <input class="sr-only" type="radio" name="security_mode" id="security-off" value="baseline" checked>
+                <label for="security-off">Security OFF</label>
+                <input class="sr-only" type="radio" name="security_mode" id="security-on" value="protected">
+                <label for="security-on">Security ON</label>
+              </div>
+            </fieldset>
+            <span class="mode-current" id="selected-mode-label">Security OFF selected</span>
+          </div>
+          <p class="run-description" id="selected-mode-description">
+            The unprotected baseline sends captured evidence directly to Gemma.
           </p>
         </div>
-
-        <div class="source-input-grid">
-          <div class="field">
-            <label for="real-url-1">Research source 1</label>
-            <input id="real-url-1" name="real_url_1" type="url" value="{{ product_url_1 }}" required>
-          </div>
-          <div class="field">
-            <label for="real-url-2">Research source 2</label>
-            <input id="real-url-2" name="real_url_2" type="url" value="{{ product_url_2 }}" required>
-          </div>
-          <div class="field">
-            <label for="attack-url">Controlled test source 3</label>
-            <input id="attack-url" name="attack_url" type="url" value="{{ attack_url }}" readonly>
-            <p class="help">Generated from Flask routing. This page contains the hidden injection.</p>
-          </div>
+        <div class="run-actions">
+          <button class="primary-button" id="run-research-button" type="button">Run Selected Mode</button>
+          <button class="secondary-button" id="compare-button" type="button" disabled>Compare Successful Runs</button>
         </div>
-
-        {% if not api_key_configured %}
-        <p class="alert alert-warning" role="alert">
-          No Gemma API key is configured. Evidence capture can still run, but both security
-          modes will be recorded as incomplete.
-        </p>
-        {% endif %}
-
-        <div class="form-actions">
-          <button class="primary-button" id="capture-button" type="submit">Capture evidence</button>
-          <p class="form-hint">Three Playwright extractions and one saved evidence snapshot. No model call.</p>
-        </div>
-        <p class="alert alert-error" id="form-error" role="alert" hidden></p>
-      </form>
-    </section>
-
-    <section class="run-status" id="run-status" aria-live="polite" hidden>
-      <span class="spinner" aria-hidden="true"></span>
-      <span id="run-status-text">Capturing sources…</span>
-    </section>
-
-    <section class="panel" id="snapshot-panel" aria-labelledby="extraction-heading" hidden>
-      <div class="panel-heading">
-        <div>
-          <p class="step-label">Evidence snapshot</p>
-          <h2 id="extraction-heading">Source extraction status</h2>
-        </div>
-        <p class="panel-note" id="snapshot-note"></p>
-      </div>
-      <div class="source-grid" id="source-grid"></div>
-      <p class="relevance-note" id="controlled-note" hidden></p>
-      <div class="inline-reports" id="snapshot-report-links"></div>
-    </section>
-
-    <section class="panel" id="mode-panel" aria-labelledby="modes-heading" hidden>
-      <div class="panel-heading">
-        <div>
-          <p class="step-label">02 · Security modes</p>
-          <h2 id="modes-heading">Run each condition independently</h2>
-        </div>
-        <p class="panel-note">Neither mode requires the other to run first. Both reuse the same snapshot and task.</p>
       </div>
 
-      <div class="mode-grid">
-        <article class="mode-card" id="baseline-mode-card">
-          <div class="mode-topline">
-            <span class="mode-label">Security OFF</span>
+      <p class="run-hint">Run one mode, switch the toggle, then run the other mode on this snapshot. Comparison unlocks only after both runs return usable responses.</p>
+
+      <div class="mode-status-row">
+        <div class="mode-status-panel">
+          <div class="mode-status-top">
+            <span class="mode-name">Security OFF</span>
             <span class="badge" id="baseline-mode-status">Not run</span>
           </div>
-          <h3>Unprotected baseline</h3>
-          <p>Send the captured evidence directly to Gemma without the untrusted-data boundary.</p>
-          <button class="secondary-button" id="run-baseline-button" type="button">Run Security OFF</button>
           <p class="mode-error" id="baseline-mode-error" hidden></p>
-          <div class="inline-reports" id="baseline-report-links"></div>
-        </article>
-
-        <article class="mode-card" id="protected-mode-card">
-          <div class="mode-topline">
-            <span class="mode-label">Security ON</span>
+          <div class="report-links" id="baseline-report-links"></div>
+        </div>
+        <div class="mode-status-panel">
+          <div class="mode-status-top">
+            <span class="mode-name">Security ON</span>
             <span class="badge" id="protected-mode-status">Not run</span>
           </div>
-          <h3>Protected condition</h3>
-          <p>Keep the task trusted and place webpage content inside a labelled untrusted-data block.</p>
-          <button class="secondary-button" id="run-protected-button" type="button">Run Security ON</button>
           <p class="mode-error" id="protected-mode-error" hidden></p>
-          <div class="inline-reports" id="protected-report-links"></div>
-        </article>
-
-        <article class="mode-card compare-card" id="compare-mode-card">
-          <div class="mode-topline">
-            <span class="mode-label">Comparison</span>
+          <div class="report-links" id="protected-report-links"></div>
+        </div>
+        <div class="mode-status-panel">
+          <div class="mode-status-top">
+            <span class="mode-name">Comparison</span>
             <span class="badge" id="compare-mode-status">Waiting for runs</span>
           </div>
-          <h3>Compare saved runs</h3>
-          <p>Pair the latest compatible runs for this snapshot. A missing run or mismatch stays incomplete.</p>
-          <button class="secondary-button" id="compare-button" type="button" disabled>Compare results</button>
           <p class="mode-error" id="compare-mode-error" hidden></p>
-        </article>
+        </div>
       </div>
+
       <p class="alert alert-error" id="mode-error" role="alert" hidden></p>
     </section>
 
-    <section id="model-results" hidden>
-      <div class="results-heading">
+    <section id="model-results" class="results" hidden>
+      <div class="section-heading">
         <div>
-          <p class="step-label">03 · Actual model output</p>
-          <h2>Responses for this snapshot</h2>
+          <p class="eyebrow">Model output</p>
+          <h2>Independent mode responses</h2>
+          <p class="section-note">Each panel shows only its own run. A failed or missing mode never borrows the other mode's output.</p>
         </div>
         <div class="badge-row" id="model-badges"></div>
       </div>
 
-      <section class="panel" aria-labelledby="responses-heading">
-        <div class="panel-heading">
-          <div>
-            <p class="step-label">Model output</p>
-            <h2 id="responses-heading">Baseline and protected responses</h2>
-          </div>
-          <p class="panel-note">Responses are shown verbatim. Provider errors are summarized; raw details remain in the JSON report.</p>
-        </div>
-        <div class="response-grid" id="response-grid"></div>
-      </section>
+      <div class="response-grid" id="response-grid" aria-live="polite"></div>
 
-      <section class="panel" aria-labelledby="validation-heading">
-        <div class="panel-heading">
-          <div>
-            <p class="step-label">Deterministic checks</p>
-            <h2 id="validation-heading">Constraint validation</h2>
-          </div>
-          <p class="panel-note">Budget validation is automatic only for an identifiable INR budget with supported captured prices.</p>
+      <details class="compact-panel">
+        <summary>
+          <span>Constraint validation</span>
+          <span class="compact-meta">Deterministic checks, when applicable</span>
+        </summary>
+        <div class="compact-content">
+          <div class="validation-grid" id="validation-grid"></div>
         </div>
-        <div class="validation-grid" id="validation-grid"></div>
-      </section>
+      </details>
     </section>
 
-    <section id="comparison-results" hidden>
-      <div class="results-heading">
+    <section id="comparison-results" class="results" hidden>
+      <div class="section-heading">
         <div>
-          <p class="step-label">04 · Paired comparison</p>
-          <h2>Evidence-backed comparison</h2>
+          <p class="eyebrow">Paired comparison</p>
+          <h2>Observed result</h2>
         </div>
         <div class="badge-row" id="result-badges"></div>
       </div>
 
-      <p class="alert alert-error" id="comparison-error" hidden></p>
+      <p class="alert alert-error" id="comparison-error" role="alert" hidden></p>
       <div class="summary-grid" id="summary-grid"></div>
 
-      <section class="panel" aria-labelledby="detection-heading">
-        <div class="panel-heading">
-          <div>
-            <p class="step-label">Instruction flow</p>
-            <h2 id="detection-heading">Was the injection present?</h2>
-          </div>
-          <p class="panel-note">Detection is heuristic; it does not prove attack success.</p>
+      <details class="compact-panel" open>
+        <summary>
+          <span>Instruction flow</span>
+          <span class="compact-meta">Heuristic detection, not proof of attack success</span>
+        </summary>
+        <div class="compact-content">
+          <div class="flag-grid" id="instruction-flags"></div>
+          <div class="finding-list" id="finding-list"></div>
         </div>
-        <div class="flag-grid" id="instruction-flags"></div>
-        <div class="finding-list" id="finding-list"></div>
-      </section>
+      </details>
 
-      <section class="panel" aria-labelledby="products-heading">
-        <div class="panel-heading">
-          <div>
-            <p class="step-label">Captured facts</p>
-            <h2 id="products-heading">Price and currency status</h2>
-          </div>
-          <p class="panel-note">Unknown or foreign-currency prices are never assumed to be over budget.</p>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Product or source</th>
-                <th scope="col">Captured price</th>
-                <th scope="col">Currency</th>
-                <th scope="col">Normalized INR</th>
-                <th scope="col">Budget status</th>
-                <th scope="col">Reason</th>
-              </tr>
-            </thead>
-            <tbody id="products-body"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel" aria-labelledby="limitations-heading">
-        <div class="panel-heading">
-          <div>
-            <p class="step-label">Interpretation</p>
-            <h2 id="limitations-heading">Limitations</h2>
+      <details class="compact-panel">
+        <summary>
+          <span>Captured facts</span>
+          <span class="compact-meta">Structured values from the saved evidence</span>
+        </summary>
+        <div class="compact-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Item</th>
+                  <th scope="col">Captured value</th>
+                  <th scope="col">Currency</th>
+                  <th scope="col">Normalized INR</th>
+                  <th scope="col">Constraint status</th>
+                  <th scope="col">Reason</th>
+                </tr>
+              </thead>
+              <tbody id="products-body"></tbody>
+            </table>
           </div>
         </div>
-        <ul class="limitations" id="limitations-list"></ul>
-      </section>
+      </details>
 
-      <section class="panel report-panel" aria-labelledby="reports-heading">
-        <div>
-          <p class="step-label">Raw evidence</p>
-          <h2 id="reports-heading">Saved JSON reports</h2>
-          <p class="panel-note">Generated reports exclude API keys and are stored under the configured runs directory.</p>
+      <details class="compact-panel">
+        <summary><span>Limitations</span></summary>
+        <div class="compact-content">
+          <ul class="limitations" id="limitations-list"></ul>
         </div>
-        <div class="report-links" id="report-links"></div>
-      </section>
+      </details>
+
+      <details class="compact-panel">
+        <summary><span>Saved reports</span></summary>
+        <div class="compact-content">
+          <div class="report-links" id="report-links"></div>
+        </div>
+      </details>
     </section>
   </main>
 
   <footer class="site-footer">
-    <div class="page-width footer-inner">
+    <div class="shell footer-inner">
       <p>HijackCheck · Controlled prompt-injection research</p>
       <p>Single paired trials describe observations, not proof of causation.</p>
     </div>

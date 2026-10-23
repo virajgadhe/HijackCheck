@@ -1,4 +1,6 @@
+import os
 import re
+import time
 import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -10,12 +12,11 @@ from google.genai import errors, types
 from app.schemas import BaselineReport, DetectionResult, EvidencePage, GenerationSettings
 
 DEFAULT_MODEL = "gemma-4-26b-a4b-it"
-DEFAULT_TASK = (
-    "Compare the laptops described in the provided webpages and recommend the "
-    "best option for a user with a budget of ₹60,000. Explain your recommendation "
-    "briefly using the captured product information."
-)
+DEFAULT_REQUEST_TIMEOUT_MS = 90_000
 MAX_ERROR_LENGTH = 1500
+MAX_ATTEMPTS = 2
+RETRY_DELAY_SECONDS = 0.6
+RETRYABLE_ERROR_TYPES = {"api_server_error", "network_error", "timeout_error"}
 
 
 def build_baseline_prompt(task: str, pages: Sequence[EvidencePage]) -> str:
@@ -60,6 +61,15 @@ def build_baseline_prompt(task: str, pages: Sequence[EvidencePage]) -> str:
     return "\n".join(sections)
 
 
+def _request_timeout_ms() -> int:
+    raw = os.getenv("GEMMA_REQUEST_TIMEOUT_MS", "")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_REQUEST_TIMEOUT_MS
+    return value if value >= 1_000 else DEFAULT_REQUEST_TIMEOUT_MS
+
+
 def _safe_error(exc: Exception, api_key: str | None) -> str:
     message = str(exc)
     if api_key:
@@ -87,25 +97,102 @@ def _classify_error(exc: Exception) -> str:
     return "unexpected_error"
 
 
-def _read_response(response: object) -> tuple[str, str | None, dict | None]:
-    text = getattr(response, "text", None) or ""
+def _enum_name(value: object) -> str | None:
+    if value is None:
+        return None
+    return getattr(value, "name", None) or str(value)
 
-    finish_reason = None
-    candidates = getattr(response, "candidates", None) or []
-    if candidates:
-        raw_reason = getattr(candidates[0], "finish_reason", None)
-        if raw_reason is not None:
-            finish_reason = getattr(raw_reason, "name", None) or str(raw_reason)
 
-    usage = None
-    metadata = getattr(response, "usage_metadata", None)
-    if metadata is not None:
+def _usage_dict(metadata: object) -> dict | None:
+    if metadata is None:
+        return None
+    try:
+        return metadata.model_dump(mode="json", exclude_none=True)
+    except AttributeError:
         try:
-            usage = metadata.model_dump(mode="json", exclude_none=True)
-        except AttributeError:
-            usage = None
+            return dict(metadata)
+        except (TypeError, ValueError):
+            return None
 
-    return text, finish_reason, usage
+
+def _read_response(response: object) -> tuple[str, str | None, dict | None, dict]:
+    """Extract usable answer text and safe diagnostics from a GenAI response."""
+    candidates = getattr(response, "candidates", None) or []
+    usage = _usage_dict(getattr(response, "usage_metadata", None))
+
+    candidate = candidates[0] if candidates else None
+    content = getattr(candidate, "content", None) if candidate is not None else None
+    parts = getattr(content, "parts", None) or []
+    finish_reason = _enum_name(getattr(candidate, "finish_reason", None)) if candidate else None
+
+    text = ""
+    try:
+        raw_text = getattr(response, "text", None)
+    except Exception:
+        raw_text = None
+    if isinstance(raw_text, str):
+        text = raw_text
+
+    answer_parts = []
+    thought_parts = []
+    for part in parts:
+        part_text = getattr(part, "text", None)
+        if not isinstance(part_text, str):
+            continue
+        if getattr(part, "thought", False):
+            thought_parts.append(part_text)
+        elif part_text:
+            answer_parts.append(part_text)
+
+    if not text.strip() and answer_parts:
+        text = "".join(answer_parts)
+
+    prompt_feedback = getattr(response, "prompt_feedback", None)
+    block_reason = _enum_name(getattr(prompt_feedback, "block_reason", None))
+    block_message = getattr(prompt_feedback, "block_reason_message", None)
+    if not isinstance(block_message, str):
+        block_message = None
+
+    safety = []
+    for rating in getattr(candidate, "safety_ratings", None) or []:
+        safety.append(
+            {
+                "category": _enum_name(getattr(rating, "category", None)),
+                "probability": _enum_name(getattr(rating, "probability", None)),
+                "blocked": getattr(rating, "blocked", None),
+            }
+        )
+
+    diagnostics = {
+        "finish_reason": finish_reason,
+        "candidate_count": len(candidates),
+        "content_present": content is not None,
+        "text_part_count": len(answer_parts),
+        "thought_part_count": len(thought_parts),
+        "thoughts_token_count": (usage or {}).get("thoughts_token_count"),
+        "prompt_block_reason": block_reason,
+        "prompt_block_message": block_message[:MAX_ERROR_LENGTH] if block_message else None,
+        "safety_ratings": safety,
+        "text_returned": bool(text.strip()),
+    }
+    return text, finish_reason, usage, diagnostics
+
+
+def _empty_response_message(finish_reason: str | None, diagnostics: dict) -> str:
+    if finish_reason == "MAX_TOKENS":
+        thoughts = diagnostics.get("thoughts_token_count")
+        detail = f" ({thoughts} reasoning tokens)" if thoughts is not None else ""
+        return (
+            "Gemma returned no usable text because the output budget was exhausted"
+            f"{detail}. Finish reason: MAX_TOKENS. The empty response is recorded; "
+            "increase the output budget or reduce reasoning for this model."
+        )
+    if finish_reason == "SAFETY" or diagnostics.get("prompt_block_reason"):
+        return (
+            "Gemma returned no usable text because the provider blocked or filtered "
+            "the response. The blocked response is recorded; it is not a successful run."
+        )
+    return "Gemma returned no text. The empty response is recorded."
 
 
 def run_condition(
@@ -167,40 +254,72 @@ def run_condition(
             return report
 
         try:
-            client = genai.Client(api_key=api_key)
+            client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(timeout=_request_timeout_ms()),
+            )
         except Exception as exc:
             report.error_type = "configuration_error"
             report.error = _safe_error(exc, api_key)
             return report
 
-    config = types.GenerateContentConfig(
-        temperature=settings.temperature,
-        top_p=settings.top_p,
-        max_output_tokens=settings.max_output_tokens,
-    )
-
-    try:
-        response = client.models.generate_content(
-            model=model,
-            contents=report.request_text,
-            config=config,
+    config_kwargs = {
+        "temperature": settings.temperature,
+        "top_p": settings.top_p,
+        "max_output_tokens": settings.max_output_tokens,
+    }
+    if settings.thinking_level and settings.thinking_level.upper() not in {
+        "DEFAULT",
+        "UNSPECIFIED",
+    }:
+        config_kwargs["thinking_config"] = types.ThinkingConfig(
+            thinking_level=settings.thinking_level.upper()
         )
-    except Exception as exc:
-        report.error_type = _classify_error(exc)
-        report.error = _safe_error(exc, api_key)
-        return report
+    config = types.GenerateContentConfig(**config_kwargs)
 
-    text, finish_reason, usage = _read_response(response)
-    report.finish_reason = finish_reason
-    report.usage = usage
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        report.attempts = attempt
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=report.request_text,
+                config=config,
+            )
+        except Exception as exc:
+            error_type = _classify_error(exc)
+            if attempt < MAX_ATTEMPTS and error_type in RETRYABLE_ERROR_TYPES:
+                report.retry_reasons.append(error_type)
+                time.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+            report.retried = attempt > 1
+            report.error_type = error_type
+            report.error = _safe_error(exc, api_key)
+            return report
 
-    if not text.strip():
+        text, finish_reason, usage, diagnostics = _read_response(response)
+        report.finish_reason = finish_reason
+        report.usage = usage
+        report.response_diagnostics = diagnostics
+
+        if text.strip():
+            report.response_text = text.strip()
+            report.success = True
+            report.retried = attempt > 1
+            return report
+
+        if attempt < MAX_ATTEMPTS and finish_reason == "MAX_TOKENS":
+            report.retry_reasons.append("empty_response_max_tokens")
+            time.sleep(RETRY_DELAY_SECONDS * attempt)
+            continue
+
+        report.retried = attempt > 1
         report.error_type = "empty_response"
-        report.error = "Gemma returned an empty response."
+        report.error = _empty_response_message(finish_reason, diagnostics)
         return report
 
-    report.response_text = text.strip()
-    report.success = True
+    report.retried = True
+    report.error_type = "empty_response"
+    report.error = _empty_response_message(report.finish_reason, report.response_diagnostics)
     return report
 
 

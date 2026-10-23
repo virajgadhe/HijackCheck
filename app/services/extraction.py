@@ -1,12 +1,27 @@
-from pydantic import BaseModel
+import time
 
+from pydantic import BaseModel
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 from app.security.url_policy import URLPolicyError, validate_url
 
-DEFAULT_TIMEOUT_MS = 15_000
+DEFAULT_TIMEOUT_MS = 25_000
+MIN_CONTENT_CHARS = 120
+MAX_ATTEMPTS = 2
+RETRY_DELAY_SECONDS = 0.4
+
+ERROR_PAGE_MARKERS = (
+    "access denied",
+    "403 forbidden",
+    "404 not found",
+    "page not found",
+    "request blocked",
+    "unusual traffic",
+    "captcha",
+    "enable javascript and cookies",
+)
 
 
 class ExtractionResult(BaseModel):
@@ -16,6 +31,103 @@ class ExtractionResult(BaseModel):
     body_text: str = ""
     success: bool = False
     error: str | None = None
+    attempts: int = 1
+    retry_reason: str | None = None
+    partial: bool = False
+    warning: str | None = None
+
+
+class _ContentError(Exception):
+    """Raised when navigation succeeded but usable page text was not obtained."""
+
+
+def _looks_like_error_page(title: str, text: str) -> bool:
+    lowered = f"{title}\n{text}".lower()
+    if len(text) > 2_000:
+        return False
+    return any(marker in lowered for marker in ERROR_PAGE_MARKERS)
+
+
+def _error_preview(exc: Exception) -> str:
+    message = " ".join(str(exc).split())
+    return message[:600]
+
+
+def _attempt_timeout(timeout_ms: int, attempt: int) -> int:
+    if attempt == 1:
+        return timeout_ms
+    return min(timeout_ms * 2, 30_000)
+
+
+def _capture_once(
+    url: str,
+    *,
+    timeout_ms: int,
+    allow_private: bool,
+    attempt: int,
+) -> ExtractionResult:
+    result = ExtractionResult(original_url=url, attempts=attempt)
+    timed_out = False
+    navigation_error = None
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            except PlaywrightTimeoutError as exc:
+                timed_out = True
+                navigation_error = _error_preview(exc)
+
+            result.final_url = page.url or ""
+            if not result.final_url or result.final_url in {
+                "about:blank",
+                "chrome-error://chromewebdata/",
+            }:
+                raise _ContentError(
+                    f"Timed out after {timeout_ms} ms and no navigable page URL was available."
+                )
+            validate_url(result.final_url, allow_private=allow_private)
+
+            try:
+                result.title = page.title()
+            except PlaywrightError:
+                result.title = ""
+
+            try:
+                text = page.inner_text("body")
+            except PlaywrightError as exc:
+                text = ""
+                navigation_error = navigation_error or _error_preview(exc)
+            text = text.strip()
+
+            if len(text) < MIN_CONTENT_CHARS:
+                if timed_out:
+                    raise _ContentError(
+                        f"Timed out after {timeout_ms} ms and no usable visible text "
+                        f"was rendered. {navigation_error or ''}".strip()
+                    )
+                raise _ContentError("Rendered page contained no usable visible text.")
+
+            if _looks_like_error_page(result.title, text):
+                raise _ContentError(
+                    "Rendered page appears to be an access-denied or error page; "
+                    "the captured text is not treated as usable evidence."
+                )
+
+            result.body_text = text
+            result.success = True
+            if timed_out:
+                result.partial = True
+                result.warning = (
+                    f"Navigation timed out after {timeout_ms} ms, but visible text "
+                    "that had already rendered was captured. Treat navigation "
+                    "completeness as unverified."
+                )
+            return result
+        finally:
+            browser.close()
 
 
 def extract_page(
@@ -24,31 +136,52 @@ def extract_page(
     *,
     allow_private: bool = False,
 ) -> ExtractionResult:
-    """Render a URL in Chromium and capture the visible text of the page."""
+    """Render a URL in Chromium and capture its visible text with bounded retries."""
     result = ExtractionResult(original_url=url)
 
     try:
         validate_url(url, allow_private=allow_private)
-
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            try:
-                page = browser.new_page()
-                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-                result.final_url = page.url
-                validate_url(result.final_url, allow_private=allow_private)
-                result.title = page.title()
-                result.body_text = page.inner_text("body")
-                result.success = True
-            finally:
-                browser.close()
     except URLPolicyError as exc:
         result.error = f"URL policy violation: {exc}"
-    except PlaywrightTimeoutError as exc:
-        result.error = f"Timed out after {timeout_ms} ms: {exc}"
-    except PlaywrightError as exc:
-        result.error = f"Playwright error: {exc}"
-    except Exception as exc:  # pragma: no cover - defensive boundary
-        result.error = f"Unexpected extraction error: {exc}"
+        return result
 
+    last_reason = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        attempt_timeout = _attempt_timeout(timeout_ms, attempt)
+        try:
+            captured = _capture_once(
+                url,
+                timeout_ms=attempt_timeout,
+                allow_private=allow_private,
+                attempt=attempt,
+            )
+            if last_reason:
+                captured.retry_reason = last_reason
+            return captured
+        except URLPolicyError as exc:
+            result.attempts = attempt
+            result.error = f"URL policy violation: {exc}"
+            return result
+        except _ContentError as exc:
+            last_reason = _error_preview(exc)
+            result.attempts = attempt
+            result.error = last_reason
+        except PlaywrightTimeoutError as exc:
+            last_reason = f"Timed out after {attempt_timeout} ms: {_error_preview(exc)}"
+            result.attempts = attempt
+            result.error = last_reason
+        except PlaywrightError as exc:
+            last_reason = f"Playwright error: {_error_preview(exc)}"
+            result.attempts = attempt
+            result.error = last_reason
+        except Exception as exc:  # pragma: no cover - defensive boundary
+            last_reason = f"Unexpected extraction error: {_error_preview(exc)}"
+            result.attempts = attempt
+            result.error = last_reason
+
+        if attempt < MAX_ATTEMPTS:
+            time.sleep(RETRY_DELAY_SECONDS)
+            result.retry_reason = last_reason
+
+    result.retry_reason = last_reason
     return result
