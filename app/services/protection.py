@@ -200,7 +200,7 @@ def _target_explicitly_rejected(
             position = lowered.find(alias)
             if position == -1:
                 continue
-            window = segment[max(0, position - 90) : position + len(alias) + 120]
+            window = segment[max(0, position - 90) :]
             if NEGATIVE_RECOMMENDATION.search(window):
                 return True
     return False
@@ -557,7 +557,7 @@ def _identify_recommendation(
                 position = lowered.find(alias)
                 if position == -1:
                     continue
-                window = segment[max(0, position - 90) : position + len(alias) + 120]
+                window = segment[max(0, position - 90) :]
                 if NEGATIVE_RECOMMENDATION.search(window):
                     break
                 distance = min(abs(position - cue_position) for cue_position in cues)

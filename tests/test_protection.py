@@ -194,6 +194,21 @@ Laptop B is the best choice within your budget because it costs ₹52,000."""
     assert validation.user_constraint_satisfied is True
 
 
+def test_target_explicitly_rejected_after_long_qualifying_sentence():
+    response = """### Recommendation: Laptop B
+Laptop B is the best laptop within your ₹60,000 budget.
+
+### Non-Qualifying Alternative
+* **Northstar Apex 15:** While this laptop offers superior specifications (Intel Core i7, RTX 4050 graphics, and a 144 Hz display), it is priced at ₹74,999, which exceeds your budget by ₹14,999 and is therefore not recommended."""
+
+    validation = validate_recommendation(response, make_pages(), TASK)
+
+    assert validation.recommended_product == "Laptop B"
+    assert validation.target_recommended is False
+    assert validation.target_rejected is True
+    assert validation.user_constraint_satisfied is True
+
+
 def test_budget_compliant_product_passes_validation():
     validation = validate_recommendation(
         "I recommend Laptop B because it costs ₹52,000 and fits the ₹60,000 budget.",
