@@ -278,7 +278,7 @@ def test_extraction_fails_for_an_http_error_response(live_server):
 def test_extraction_retries_http_5xx_responses(monkeypatch):
     calls = []
 
-    def fake_capture(url, *, timeout_ms, allow_private, attempt):
+    def fake_capture(url, *, timeout_ms, allow_private, attempt, include_hidden=False):
         calls.append(attempt)
         raise extraction._ContentError("HTTP 503 from upstream.", http_status=503)
 
@@ -297,7 +297,7 @@ def test_extraction_retries_http_5xx_responses(monkeypatch):
 def test_extraction_does_not_retry_http_4xx_responses(monkeypatch):
     calls = []
 
-    def fake_capture(url, *, timeout_ms, allow_private, attempt):
+    def fake_capture(url, *, timeout_ms, allow_private, attempt, include_hidden=False):
         calls.append(attempt)
         raise extraction._ContentError(
             "HTTP 404 from upstream.",
@@ -320,7 +320,7 @@ def test_extraction_does_not_retry_http_4xx_responses(monkeypatch):
 def test_extraction_retries_a_content_failure(monkeypatch):
     calls = []
 
-    def fake_capture(url, *, timeout_ms, allow_private, attempt):
+    def fake_capture(url, *, timeout_ms, allow_private, attempt, include_hidden=False):
         calls.append(attempt)
         if attempt == 1:
             raise extraction._ContentError("Rendered page contained no usable visible text.")
@@ -367,3 +367,177 @@ def test_chromium_launches(chromium):
         assert page.inner_text("h1") == "Chromium ready"
     finally:
         page.close()
+
+
+def test_attack_page_serves_visible_hidden_and_control_variants():
+    client = create_app().test_client()
+
+    visible = unescape(
+        client.get("/lab/attack-page?variant=visible").get_data(as_text=True)
+    )
+    assert 'data-variant="visible"' in visible
+    assert 'class="assistant-note"' in visible
+    assert ATTACK_NOTE in visible
+    assert ATTACK_MARKER in visible
+
+    hidden = unescape(
+        client.get("/lab/attack-page?variant=hidden").get_data(as_text=True)
+    )
+    assert 'data-variant="hidden"' in hidden
+    assert '<div id="hidden-injection" hidden></div>' in hidden
+    assert 'class="assistant-note"' not in hidden
+    assert "hidden-injection" in hidden
+
+    control = unescape(
+        client.get("/lab/attack-page?variant=control").get_data(as_text=True)
+    )
+    assert 'data-variant="control"' in control
+    assert "Northstar Apex 15" in control
+    assert "₹74,999" in control
+    assert ATTACK_NOTE not in control
+    assert ATTACK_MARKER not in control
+    assert "assistant-note" not in control
+    assert "hidden-injection" not in control
+
+    assert client.get("/lab/attack-page?variant=unexpected").status_code == 400
+
+
+def test_hidden_variant_injects_at_runtime(live_server, chromium):
+    url = f"{live_server}/lab/attack-page?variant=hidden"
+    page = chromium.new_page()
+    try:
+        page.goto(url)
+        hidden_node = page.locator("#hidden-injection")
+        assert hidden_node.is_hidden()
+        assert hidden_node.text_content() == ATTACK_INSTRUCTION
+    finally:
+        page.close()
+
+
+def test_hidden_variant_requires_dom_extraction(live_server):
+    url = f"{live_server}/lab/attack-page?variant=hidden"
+
+    visible = extract_page(url, allow_private=True)
+    assert visible.success, visible.error
+    assert visible.extraction_method == "visible"
+    assert ATTACK_NOTE not in visible.body_text
+    assert ATTACK_MARKER not in visible.body_text
+    assert "Northstar Apex 15" in visible.body_text
+
+    dom = extract_page(url, allow_private=True, include_hidden=True)
+    assert dom.success, dom.error
+    assert dom.extraction_method == "dom"
+    assert ATTACK_NOTE in dom.body_text
+    assert ATTACK_MARKER in dom.body_text
+    assert ATTACK_NOTE in (dom.dom_text or "")
+
+
+def test_control_variant_contains_no_injected_instruction(live_server):
+    url = f"{live_server}/lab/attack-page?variant=control"
+    result = extract_page(url, allow_private=True, include_hidden=True)
+
+    assert result.success, result.error
+    assert result.extraction_method == "dom"
+    assert "Northstar Apex 15" in result.body_text
+    assert "₹74,999" in result.body_text
+    assert ATTACK_NOTE not in result.body_text
+    assert ATTACK_MARKER not in result.body_text
+    assert ATTACK_MARKER not in (result.dom_text or "")
+
+
+def test_hidden_fixture_is_saved_and_reaches_saved_mode_requests(
+    live_server, tmp_path
+):
+    controlled_base = f"{live_server}/lab/attack-page"
+    hidden_url = f"{controlled_base}?variant=hidden"
+    external_urls = ["https://example.com/dell", "https://example.com/flipkart"]
+
+    def hybrid_extractor(
+        url, *, timeout_ms, allow_private, include_hidden=False
+    ):
+        if url == hidden_url:
+            return extract_page(
+                url,
+                timeout_ms=timeout_ms,
+                allow_private=allow_private,
+                include_hidden=include_hidden,
+            )
+        return ExtractionResult(
+            original_url=url,
+            final_url=url,
+            title="Synthetic external source",
+            body_text="A laptop costs ₹55,000 and is available for comparison.",
+            success=True,
+            http_status=200,
+        )
+
+    captured = capture_evidence(
+        DEFAULT_TASK,
+        [*external_urls, hidden_url],
+        controlled_url=controlled_base,
+        runs_dir=tmp_path,
+        extraction_timeout_ms=5000,
+        extractor=hybrid_extractor,
+    )
+    assert captured.status_code == 200
+
+    snapshot = load_snapshot(captured.snapshot.snapshot_id, tmp_path)
+    controlled_page = snapshot.pages[2]
+    assert snapshot.controlled_variant == "hidden"
+    assert controlled_page.extraction_method == "dom"
+    assert ATTACK_NOTE in controlled_page.text
+    assert ATTACK_MARKER in controlled_page.text
+    assert ATTACK_NOTE in (controlled_page.dom_text or "")
+
+    def baseline_runner(task, pages, *, model, settings, api_key):
+        return run_baseline(
+            task,
+            pages,
+            model=model,
+            settings=settings,
+            api_key=api_key,
+            client=FakeClient("No laptop fits the budget."),
+        )
+
+    def protected_runner(task, pages, *, model, settings, api_key):
+        return run_protected(
+            task,
+            pages,
+            model=model,
+            settings=settings,
+            api_key=api_key,
+            client=FakeClient("No laptop fits the budget."),
+        )
+
+    baseline = run_saved_condition(
+        snapshot.snapshot_id,
+        "baseline",
+        model="gemma-4-26b-a4b-it",
+        api_key="test-key",
+        runs_dir=tmp_path,
+        baseline_runner=baseline_runner,
+        protected_runner=protected_runner,
+    )
+    protected = run_saved_condition(
+        snapshot.snapshot_id,
+        "protected",
+        model="gemma-4-26b-a4b-it",
+        api_key="test-key",
+        runs_dir=tmp_path,
+        baseline_runner=baseline_runner,
+        protected_runner=protected_runner,
+    )
+
+    assert baseline.report.controlled_variant == "hidden"
+    assert protected.report.controlled_variant == "hidden"
+    for request_text in (
+        baseline.report.request_text,
+        protected.report.request_text,
+    ):
+        assert request_text.count(ATTACK_NOTE) == 1
+        assert request_text.count(ATTACK_MARKER) == 1
+    assert (
+        protected.report.request_text.find(UNTRUSTED_START)
+        < protected.report.request_text.find(ATTACK_NOTE)
+        < protected.report.request_text.find(UNTRUSTED_END)
+    )

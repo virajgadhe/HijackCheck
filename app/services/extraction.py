@@ -29,6 +29,8 @@ class ExtractionResult(BaseModel):
     final_url: str = ""
     title: str = ""
     body_text: str = ""
+    dom_text: str | None = None
+    extraction_method: str = "visible"
     success: bool = False
     error: str | None = None
     http_status: int | None = None
@@ -71,14 +73,27 @@ def _attempt_timeout(timeout_ms: int, attempt: int) -> int:
     return min(timeout_ms * 2, 30_000)
 
 
+DOM_TEXT_SCRIPT = """() => {
+  const clone = document.body.cloneNode(true);
+  clone.querySelectorAll("script, style, noscript, template").forEach((node) => node.remove());
+  return clone.textContent || "";
+}"""
+
+
 def _capture_once(
     url: str,
     *,
     timeout_ms: int,
     allow_private: bool,
     attempt: int,
+    include_hidden: bool = False,
 ) -> ExtractionResult:
-    result = ExtractionResult(original_url=url, attempts=attempt)
+    method = "dom" if include_hidden else "visible"
+    result = ExtractionResult(
+        original_url=url,
+        attempts=attempt,
+        extraction_method=method,
+    )
     timed_out = False
     navigation_error = None
 
@@ -121,19 +136,23 @@ def _capture_once(
                 result.title = ""
 
             try:
-                text = page.inner_text("body")
+                if include_hidden:
+                    text = page.evaluate(DOM_TEXT_SCRIPT)
+                    result.dom_text = text
+                else:
+                    text = page.inner_text("body")
             except PlaywrightError as exc:
                 text = ""
                 navigation_error = navigation_error or _error_preview(exc)
-            text = text.strip()
+            text = (text or "").strip()
 
             if len(text) < MIN_CONTENT_CHARS:
                 if timed_out:
                     raise _ContentError(
-                        f"Timed out after {timeout_ms} ms and no usable visible text "
+                        f"Timed out after {timeout_ms} ms and no usable {method} text "
                         f"was rendered. {navigation_error or ''}".strip()
                     )
-                raise _ContentError("Rendered page contained no usable visible text.")
+                raise _ContentError(f"Rendered page contained no usable {method} text.")
 
             if _looks_like_error_page(result.title, text):
                 raise _ContentError(
@@ -147,7 +166,7 @@ def _capture_once(
             if timed_out:
                 result.partial = True
                 result.warning = (
-                    f"Navigation timed out after {timeout_ms} ms, but visible text "
+                    f"Navigation timed out after {timeout_ms} ms, but {method} text "
                     "that had already rendered was captured. Treat navigation "
                     "completeness as unverified."
                 )
@@ -161,9 +180,11 @@ def extract_page(
     timeout_ms: int = DEFAULT_TIMEOUT_MS,
     *,
     allow_private: bool = False,
+    include_hidden: bool = False,
 ) -> ExtractionResult:
-    """Render a URL in Chromium and capture its visible text with bounded retries."""
-    result = ExtractionResult(original_url=url)
+    """Render a URL and capture visible text or the full DOM text with bounded retries."""
+    method = "dom" if include_hidden else "visible"
+    result = ExtractionResult(original_url=url, extraction_method=method)
 
     try:
         validate_url(url, allow_private=allow_private)
@@ -181,6 +202,7 @@ def extract_page(
                 timeout_ms=attempt_timeout,
                 allow_private=allow_private,
                 attempt=attempt,
+                include_hidden=include_hidden,
             )
             if last_reason:
                 captured.retry_reason = last_reason

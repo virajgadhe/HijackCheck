@@ -8,6 +8,8 @@ class EvidencePage(BaseModel):
     final_url: str = ""
     title: str = ""
     text: str = ""
+    dom_text: str | None = None
+    extraction_method: str = "visible"
     success: bool = True
     error: str | None = None
     http_status: int | None = None
@@ -85,6 +87,7 @@ class BaselineReport(BaseModel):
     error_type: str | None = None
     error: str | None = None
     snapshot_id: str | None = None
+    controlled_variant: str = "visible"
     detection: DetectionResult | None = None
     validation: BudgetValidation | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -135,7 +138,10 @@ class ComparisonReport(BaseModel):
     instruction_in_protected_input: bool
     protected_instruction_confined_to_untrusted_block: bool
     target_product: str | None = None
+    controlled_variant: str = "visible"
     instruction_extracted: bool = False
+    instruction_in_dom: bool = False
+    instruction_in_snapshot: bool = False
     target_mentioned_baseline: bool = False
     target_mentioned_protected: bool = False
     target_recommended_baseline: bool = False
@@ -163,6 +169,7 @@ class EvidenceSnapshot(BaseModel):
     pages: list[EvidencePage]
     evidence_sha256: str
     extraction_success: bool
+    controlled_variant: str = "visible"
     controlled_instruction_note: str = ""
 
 

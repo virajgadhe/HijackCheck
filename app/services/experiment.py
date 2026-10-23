@@ -18,6 +18,7 @@ from app.schemas import (
 from app.security.url_policy import URLPolicyError, validate_url
 from app.services.evaluation import compare_conditions, evidence_sha256
 from app.services.extraction import extract_page
+from app.services.fixture import variant_from_url
 from app.services.gemma import run_baseline
 from app.services.protection import (
     assess_controlled_instruction_relevance,
@@ -108,6 +109,10 @@ def _validate_experiment_urls(urls: Sequence[str], controlled_url: str) -> None:
         raise ExperimentValidationError(
             "Website 3 must be the controlled HijackCheck attack page."
         )
+    try:
+        variant_from_url(urls[2])
+    except ValueError as exc:
+        raise ExperimentValidationError(str(exc)) from exc
 
     for index, url in enumerate(urls, start=1):
         try:
@@ -158,10 +163,14 @@ def _extract_pages(
     controlled = canonical_url(controlled_url)
     pages = []
     for url in urls:
+        is_controlled = canonical_url(url) == controlled
+        include_hidden = is_controlled and variant_from_url(url) == "hidden"
+        extraction_kwargs = {"include_hidden": True} if include_hidden else {}
         result = extractor(
             url,
             timeout_ms=extraction_timeout_ms,
-            allow_private=canonical_url(url) == controlled,
+            allow_private=is_controlled,
+            **extraction_kwargs,
         )
         pages.append(
             EvidencePage(
@@ -169,6 +178,8 @@ def _extract_pages(
                 final_url=result.final_url,
                 title=result.title,
                 text=result.body_text,
+                dom_text=getattr(result, "dom_text", None),
+                extraction_method=getattr(result, "extraction_method", "visible"),
                 success=result.success,
                 error=result.error,
                 http_status=getattr(result, "http_status", None),
@@ -212,6 +223,7 @@ def capture_evidence(
         pages=pages,
         evidence_sha256=evidence_sha256(pages),
         extraction_success=extraction_success,
+        controlled_variant=variant_from_url(urls[2]),
         controlled_instruction_note=assess_controlled_instruction_relevance(task),
     )
     snapshot_path = save_report(snapshot, runs_dir)
@@ -285,6 +297,7 @@ def run_saved_condition(
         )
 
     report.snapshot_id = snapshot.snapshot_id
+    report.controlled_variant = snapshot.controlled_variant
     _attach_validation(report)
     report_path = save_report(report, runs_dir)
     return ConditionOutcome(
@@ -398,6 +411,7 @@ def run_experiment(
         pages=pages,
         evidence_sha256=digest,
         extraction_success=extraction_success,
+        controlled_variant=variant_from_url(urls[2]),
         controlled_instruction_note=assess_controlled_instruction_relevance(task),
     )
     snapshot_path = save_report(snapshot, runs_dir)
@@ -437,6 +451,7 @@ def run_experiment(
         api_key=api_key,
     )
     baseline.snapshot_id = snapshot.snapshot_id
+    baseline.controlled_variant = snapshot.controlled_variant
     _attach_validation(baseline)
     baseline_path = save_report(baseline, runs_dir)
     report_files["baseline"] = baseline_path.name
@@ -449,6 +464,7 @@ def run_experiment(
         api_key=api_key,
     )
     protected.snapshot_id = snapshot.snapshot_id
+    protected.controlled_variant = snapshot.controlled_variant
     _attach_validation(protected)
     protected_path = save_report(protected, runs_dir)
     report_files["protected"] = protected_path.name

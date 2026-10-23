@@ -1,6 +1,7 @@
 import re
 from flask import (
     Blueprint,
+    abort,
     current_app,
     jsonify,
     render_template,
@@ -13,6 +14,7 @@ from app.schemas import EvidencePage, GenerationSettings
 from app.security.url_policy import URLPolicyError, validate_url
 from app.services.experiment import (
     ExperimentValidationError,
+    canonical_url,
     IncompatibleRunsError,
     MissingConditionRunError,
     SnapshotNotFoundError,
@@ -24,10 +26,15 @@ from app.services.experiment import (
 )
 from app.services.extraction import extract_page
 from app.services.fixture import (
+    ATTACK_INSTRUCTION,
     ATTACK_MARKER,
     ATTACK_NOTE,
+    DEFAULT_PAGE_VARIANT,
     DEFAULT_RESOURCE_URLS,
     DEFAULT_TASK,
+    PAGE_VARIANTS,
+    normalize_variant,
+    variant_from_url,
 )
 from app.services.gemma import run_baseline
 from app.services.reporting import save_report
@@ -37,8 +44,10 @@ main = Blueprint("main", __name__)
 REPORT_FILENAME = re.compile(r"^[A-Za-z0-9._-]+\.json$")
 
 
-def _controlled_url() -> str:
-    return url_for("main.attack_page", _external=True)
+def _controlled_url(variant: str = DEFAULT_PAGE_VARIANT) -> str:
+    if variant == DEFAULT_PAGE_VARIANT:
+        return url_for("main.attack_page", _external=True)
+    return url_for("main.attack_page", _external=True, variant=variant)
 
 
 @main.get("/")
@@ -49,6 +58,8 @@ def index():
         resource_url_1=DEFAULT_RESOURCE_URLS[0],
         resource_url_2=DEFAULT_RESOURCE_URLS[1],
         attack_url=_controlled_url(),
+        attack_variant=DEFAULT_PAGE_VARIANT,
+        attack_variants=PAGE_VARIANTS,
         api_key_configured=bool(current_app.config["GOOGLE_API_KEY"]),
     )
 
@@ -60,10 +71,16 @@ def health():
 
 @main.get("/lab/attack-page")
 def attack_page():
+    try:
+        variant = normalize_variant(request.args.get("variant"))
+    except ValueError as exc:
+        abort(400, description=str(exc))
     return render_template(
         "lab/attack_page.html",
+        variant=variant,
         attack_marker=ATTACK_MARKER,
         attack_note=ATTACK_NOTE,
+        attack_instruction=ATTACK_INSTRUCTION,
     )
 
 
@@ -270,15 +287,28 @@ def baseline():
         return jsonify(error=str(exc)), 400
 
     timeout_ms = int(current_app.config["EXTRACTION_TIMEOUT_MS"])
+    controlled = canonical_url(_controlled_url())
     pages = []
     for url in urls:
-        result = extract_page(url, timeout_ms=timeout_ms, allow_private=allow_private)
+        is_controlled = canonical_url(url) == controlled
+        try:
+            include_hidden = is_controlled and variant_from_url(url) == "hidden"
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        result = extract_page(
+            url,
+            timeout_ms=timeout_ms,
+            allow_private=allow_private,
+            include_hidden=include_hidden,
+        )
         pages.append(
             EvidencePage(
                 url=result.original_url,
                 final_url=result.final_url,
                 title=result.title,
                 text=result.body_text,
+                dom_text=result.dom_text,
+                extraction_method=result.extraction_method,
                 success=result.success,
                 error=result.error,
                 attempts=result.attempts,
