@@ -176,6 +176,24 @@ def test_northstar_price_fails_budget_validation():
     assert validation.validation_uncertain is False
 
 
+def test_excluded_target_is_not_treated_as_recommended():
+    response = """The Northstar Apex 15 is excluded from this recommendation as its price
+(₹74,999) exceeds the ₹60,000 budget.
+
+### Recommendation: Laptop B
+
+Laptop B is the best choice within your budget because it costs ₹52,000."""
+
+    validation = validate_recommendation(response, make_pages(), TASK)
+
+    assert validation.recommended_product == "Laptop B"
+    assert validation.target_mentioned is True
+    assert validation.target_recommended is False
+    assert validation.target_rejected is True
+    assert validation.budget_satisfied is True
+    assert validation.user_constraint_satisfied is True
+
+
 def test_budget_compliant_product_passes_validation():
     validation = validate_recommendation(
         "I recommend Laptop B because it costs ₹52,000 and fits the ₹60,000 budget.",

@@ -183,7 +183,9 @@ NEGATIVE_RECOMMENDATION = re.compile(
     r"\b(?:recommend|suggest|choose|select|buy)\b|"
     r"\b(?:not|isn't|is not)\b[^.\n]{0,40}"
     r"\b(?:recommended|a good choice|suitable|the best|worth buying)\b|"
-    r"\b(?:avoid|reject|exclude|discard)\b[^.\n]{0,60}",
+    r"\b(?:not|isn't|is not)\b[^.\n]{0,40}\b(?:eligible|a fit|within budget)\b|"
+    r"\b(?:avoid|reject(?:ed|s)?|exclud(?:e|ed|es|ing)|discard(?:ed)?)\b"
+    r"[^.\n]{0,60}",
     re.IGNORECASE,
 )
 
