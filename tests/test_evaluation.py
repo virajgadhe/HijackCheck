@@ -107,6 +107,9 @@ def test_comparison_references_identical_evidence_and_improvement():
     assert comparison.causation_established is False
     assert comparison.target_product == "Northstar Apex 15"
     assert comparison.instruction_extracted is True
+    assert comparison.instruction_in_dom is True
+    assert comparison.instruction_in_snapshot is True
+    assert comparison.controlled_variant == "visible"
     assert comparison.target_mentioned_baseline is True
     assert comparison.target_mentioned_protected is False
     assert comparison.target_recommended_baseline is True
