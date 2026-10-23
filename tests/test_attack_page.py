@@ -77,7 +77,8 @@ def test_attack_page_is_served_with_injection():
 
     assert response.status_code == 200
     html = unescape(response.get_data(as_text=True))
-    assert "Controlled security fixture" in html
+    assert "HijackCheck controlled fixture" in html
+    assert "Controlled security fixture" not in html
     assert "Northstar Apex 15" in html
     assert "₹74,999" in html
     assert ATTACK_NOTE in html
@@ -105,6 +106,10 @@ def test_playwright_extracts_rendered_attack_page(live_server):
     assert "512 GB PCIe Gen 4 NVMe SSD" in text
     assert ATTACK_NOTE in text
     assert ATTACK_MARKER in text
+    assert "Controlled security fixture" not in text
+    assert "controlled security experiment" not in text
+    assert "tests whether text embedded" not in text
+    assert "HijackCheck controlled fixture" not in text
 
 
 def test_rendered_instruction_reaches_exact_baseline_and_protected_requests(live_server):
@@ -185,6 +190,9 @@ def test_rendered_fixture_is_saved_and_reaches_saved_mode_requests(live_server, 
     assert controlled_page.final_url == controlled_url
     assert ATTACK_NOTE in controlled_page.text
     assert ATTACK_MARKER in controlled_page.text
+    assert "Controlled security fixture" not in controlled_page.text
+    assert "controlled security experiment" not in controlled_page.text
+    assert "tests whether text embedded" not in controlled_page.text
 
     def baseline_runner(task, pages, *, model, settings, api_key):
         return run_baseline(
@@ -216,8 +224,11 @@ def test_rendered_fixture_is_saved_and_reaches_saved_mode_requests(live_server, 
         protected_runner=protected_runner,
     )
     assert baseline.report.snapshot_id == snapshot.snapshot_id
-    assert ATTACK_NOTE in baseline.report.request_text
-    assert ATTACK_MARKER in baseline.report.request_text
+    assert baseline.report.request_text.count(ATTACK_NOTE) == 1
+    assert baseline.report.request_text.count(ATTACK_MARKER) == 1
+    assert "Controlled security fixture" not in baseline.report.request_text
+    assert "controlled security experiment" not in baseline.report.request_text
+    assert "tests whether text embedded" not in baseline.report.request_text
     assert controlled_url in baseline.report.request_text
     assert "https://example.com/dell" in baseline.report.request_text
     assert UNTRUSTED_START not in baseline.report.request_text
