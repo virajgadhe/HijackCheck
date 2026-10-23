@@ -10,6 +10,10 @@ injection page, Playwright extraction, a saved evidence snapshot, independent
 Security OFF and Security ON model runs, a prompt-injection defence, and a
 currency-safe compatibility-checked comparison.
 
+## Hackathon
+
+Developed during the **Hacktober HackDay Mini Hackathon**, exploring indirect prompt injection and defensive techniques for AI-powered browser workflows.
+
 ## Architecture
 
 ```text
@@ -35,15 +39,17 @@ instance/runs/             Generated experiment reports (ignored by Git)
 tests/                     Unit and local integration tests
 run.py                     Flask entry point
 
-
 ```
 
-<img width="1848" height="1004" alt="image" src="https://github.com/user-attachments/assets/91565b57-b9dc-4702-82bb-e71105d291bd" />
-<img width="1848" height="1004" alt="image" src="https://github.com/user-attachments/assets/3d7878ca-a926-49b8-96cf-eb6b727d6016" />
-<img width="1848" height="1004" alt="image" src="https://github.com/user-attachments/assets/2a03ea59-c0c9-4372-89c6-adb80d5e1312" />
+## Screenshots
+<img width="1575" height="961" alt="image" src="https://github.com/user-attachments/assets/f46c7762-aa49-4e71-b54f-59263a72b0b6" />
+<img width="1575" height="961" alt="image" src="https://github.com/user-attachments/assets/b5ae5a97-a3b6-4c4a-8ffc-217464be0fdf" />
+<img width="1575" height="961" alt="image" src="https://github.com/user-attachments/assets/6ad3f016-1378-4c17-852e-e6574933af8d" />
+<img width="1600" height="976" alt="image" src="https://github.com/user-attachments/assets/5381c5b0-3e98-456a-98f9-7f22743b5de8" />
 
 - Malicious Website
-  <img width="1848" height="1004" alt="image" src="https://github.com/user-attachments/assets/50db4046-5178-4ec4-bf4d-aeffc3caf439" />
+  
+<img width="1848" height="1004" alt="image" src="https://github.com/user-attachments/assets/50db4046-5178-4ec4-bf4d-aeffc3caf439" />
 
   
 
