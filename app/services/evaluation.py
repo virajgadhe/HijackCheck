@@ -41,10 +41,12 @@ def evidence_sha256(pages) -> str:
 
 
 def _validation_for(report: BaselineReport) -> BudgetValidation:
-    if report.validation is not None:
-        return report.validation
+    # Recompute from the actual response so comparisons use the current
+    # deterministic validator rather than a validation saved by an older build.
     if report.response_text:
         return validate_recommendation(report.response_text, report.pages, report.task)
+    if report.validation is not None:
+        return report.validation
     return BudgetValidation(
         validation_uncertain=True,
         reason="No model response was available for validation.",

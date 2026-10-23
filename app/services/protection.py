@@ -100,20 +100,27 @@ GENERIC_PRODUCT_TOKENS = {
 
 
 def _name_aliases(name: str, facts: Sequence[ProductFact]) -> list[str]:
-    """Return conservative aliases for a product, avoiding ambiguous brand words."""
-    aliases = {name.strip().lower()}
-    if not name.strip():
+    """Return conservative aliases for a product, avoiding ambiguous words."""
+    cleaned = name.strip().lower()
+    aliases = {cleaned}
+    if not cleaned:
         return sorted(aliases)
 
-    tokens = re.findall(r"[A-Za-z][A-Za-z0-9+.-]{3,}", name)
-    other_names = [fact.name.lower() for fact in facts if fact.name.lower() != name.lower()]
-    for token in tokens:
-        lowered = token.lower()
-        if lowered in GENERIC_PRODUCT_TOKENS:
-            continue
-        if any(lowered in other for other in other_names):
-            continue
-        aliases.add(lowered)
+    tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9+.-]*", name)
+    other_names = [fact.name.lower() for fact in facts if fact.name.lower() != cleaned]
+    if not tokens:
+        return sorted(aliases)
+
+    brand = tokens[0].lower()
+    if len(brand) >= 3 and brand not in GENERIC_PRODUCT_TOKENS:
+        if not any(brand in other for other in other_names):
+            aliases.add(brand)
+
+    if len(tokens) >= 2:
+        prefix = " ".join(tokens[:2]).lower()
+        if not any(prefix in other for other in other_names):
+            aliases.add(prefix)
+
     return sorted(aliases)
 
 
@@ -345,10 +352,21 @@ OVER_BUDGET_PATTERNS = (
 )
 
 NO_OPTION_PATTERNS = (
-    r"\bnone\b[^.\n]{0,100}\b(?:within|under|meet\w*|satisf\w*|fit|fall within)\b"
-    r"[^.\n]{0,60}\bbudget\b",
+    r"\bnone\b[^.\n]{0,100}\b(?:within|under|below|meet\w*|satisf\w*|fit|"
+    r"fall within|afford)\b[^.\n]{0,60}\bbudget\b",
     r"\bno\b[^.\n]{0,40}\b(?:laptops?|products?|options?)\b[^.\n]{0,100}"
-    r"\b(?:within|under|meet\w*|satisf\w*|fit)\b[^.\n]{0,60}\bbudget\b",
+    r"\b(?:within|under|below|meet\w*|satisf\w*|fit|afford)\b"
+    r"[^.\n]{0,60}\bbudget\b",
+    r"\bnone\b[^.\n]{0,120}\b(?:qualif(?:y|ies)|priced|available|"
+    r"at or below|below|under)\b",
+    r"\bno\b[^.\n]{0,60}\b(?:laptops?|products?|options?)\b[^.\n]{0,100}"
+    r"\b(?:qualif(?:y|ies)|at or below|below|under)\b",
+)
+
+RECOMMENDATION_CUE = re.compile(
+    r"\b(?:recommend(?:ed|ation|ations|s)?\b(?!\s+for\b)|suggest(?:ed|ion|ions|s)?\b|"
+    r"best (?:choice|option)\b|choose\b|pick\b|go for\b)",
+    re.IGNORECASE,
 )
 
 
@@ -515,11 +533,7 @@ def _recommendation_segments(response_text: str) -> list[str]:
     lines = [line.strip() for line in response_text.splitlines() if line.strip()]
     segments = list(_sentences(response_text))
     for index, line in enumerate(lines[:-1]):
-        if re.search(
-            r"\b(?:recommend\w*|suggest\w*|best choice|choose|pick|go for)\b",
-            line,
-            re.IGNORECASE,
-        ):
+        if RECOMMENDATION_CUE.search(line):
             segments.append(f"{line} {lines[index + 1]}")
     return list(dict.fromkeys(segments))
 
@@ -527,13 +541,8 @@ def _recommendation_segments(response_text: str) -> list[str]:
 def _identify_recommendation(
     response_text: str, facts: list[ProductFact]
 ) -> tuple[ProductFact | None, str]:
-    cue = re.compile(
-        r"\b(?:recommend\w*|suggest\w*|best choice|choose|pick|go for)\b",
-        re.IGNORECASE,
-    )
-
     for segment in _recommendation_segments(response_text):
-        cues = [match.start() for match in cue.finditer(segment)]
+        cues = [match.start() for match in RECOMMENDATION_CUE.finditer(segment)]
         if not cues:
             continue
 
