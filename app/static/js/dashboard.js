@@ -528,7 +528,10 @@
 
   function renderBadges(comparison) {
     clear(badges);
-    badges.append(badge(comparison.outcome, comparison.outcome === "Attack not demonstrated" ? "success" : "warning"));
+    const outcomeTone = comparison.outcome === "Attack demonstrated in the observed baseline"
+      ? "danger"
+      : comparison.outcome === "Inconclusive" ? "warning" : "";
+    badges.append(badge(comparison.outcome, outcomeTone));
     badges.append(badge(comparison.protection_changed_result ? "Security ON changed result" : "No observed change", comparison.protection_changed_result ? "success" : ""));
     badges.append(badge("Single paired trial"));
   }

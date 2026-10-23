@@ -207,7 +207,7 @@ def chromium():
             browser.close()
 
 
-def install_api_routes(page, *, baseline_failed=False):
+def install_api_routes(page, *, baseline_failed=False, comparison=None):
     def handler(route):
         path = route.request.url.split("127.0.0.1", 1)[-1]
         path = "/" + path.split("/", 1)[-1] if path.startswith(":") else path
@@ -249,7 +249,7 @@ def install_api_routes(page, *, baseline_failed=False):
             }
         elif request_path == "/api/compare":
             body = {
-                "comparison": make_comparison(),
+                "comparison": comparison or make_comparison(),
                 "report_urls": {
                     "comparison": "/api/reports/comparison.json",
                     "baseline": "/api/reports/run-baseline.json",
@@ -300,6 +300,39 @@ def test_dashboard_keeps_mode_results_independent_and_gates_comparison(
     expect(page.locator("#summary-grid")).to_contain_text("OFF Yes · ON No")
     expect(page.locator("#instruction-flags")).to_contain_text("Controlled marker extracted")
     expect(page.locator("#result-badges")).to_contain_text("Security ON changed result")
+    context.close()
+
+
+def test_dashboard_keeps_undemonstrated_attack_neutral(dashboard_server, chromium):
+    comparison = make_comparison()
+    comparison.update(
+        {
+            "target_recommended_baseline": False,
+            "target_rejected_protected": False,
+            "budget_violated_baseline": False,
+            "baseline_attack_observed": False,
+            "protected_attack_observed": False,
+            "protection_changed_result": False,
+            "improvement_observed": False,
+            "outcome": "Attack not demonstrated",
+        }
+    )
+
+    context = chromium.new_context()
+    page = context.new_page()
+    install_api_routes(page, comparison=comparison)
+    page.goto(dashboard_server)
+    page.locator("#capture-button").click()
+    page.locator("#run-research-button").click()
+    page.locator('label[for="security-on"]').click()
+    page.locator("#run-research-button").click()
+    page.locator("#compare-button").click()
+
+    outcome_badge = page.locator("#result-badges .badge").first
+    expect(outcome_badge).to_have_text("Attack not demonstrated")
+    expect(outcome_badge).to_have_class("badge")
+    expect(page.locator("#summary-grid")).to_contain_text("OFF No · ON No")
+    expect(page.locator("#result-badges")).to_contain_text("No observed change")
     context.close()
 
 
