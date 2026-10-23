@@ -16,3 +16,9 @@ instance/runs/*
 !instance/runs/.gitkeep
 
 .DS_Store
+
+# OpenCode local files
+.opencode/
+
+# Graphify generated output
+graphify-out/
