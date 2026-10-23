@@ -41,9 +41,16 @@ class ExtractionResult(BaseModel):
 class _ContentError(Exception):
     """Raised when navigation succeeded but usable page text was not obtained."""
 
-    def __init__(self, message: str, *, http_status: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None = None,
+        retryable: bool = True,
+    ):
         super().__init__(message)
         self.http_status = http_status
+        self.retryable = retryable
 
 
 def _looks_like_error_page(title: str, text: str) -> bool:
@@ -100,10 +107,12 @@ def _capture_once(
             validate_url(result.final_url, allow_private=allow_private)
 
             if result.http_status is not None and result.http_status >= 400:
+                retryable = result.http_status >= 500 or result.http_status in {408, 425, 429}
                 raise _ContentError(
                     f"Rendered page returned HTTP {result.http_status}; "
                     "the captured content is not treated as usable evidence.",
                     http_status=result.http_status,
+                    retryable=retryable,
                 )
 
             try:
@@ -165,6 +174,7 @@ def extract_page(
     last_reason = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         attempt_timeout = _attempt_timeout(timeout_ms, attempt)
+        retryable = True
         try:
             captured = _capture_once(
                 url,
@@ -183,6 +193,7 @@ def extract_page(
             last_reason = _error_preview(exc)
             result.attempts = attempt
             result.error = last_reason
+            retryable = exc.retryable
             if exc.http_status is not None:
                 result.http_status = exc.http_status
         except PlaywrightTimeoutError as exc:
@@ -198,9 +209,11 @@ def extract_page(
             result.attempts = attempt
             result.error = last_reason
 
-        if attempt < MAX_ATTEMPTS:
-            time.sleep(RETRY_DELAY_SECONDS)
-            result.retry_reason = last_reason
+        if not retryable or attempt >= MAX_ATTEMPTS:
+            break
+        time.sleep(RETRY_DELAY_SECONDS)
+        result.retry_reason = last_reason
 
-    result.retry_reason = last_reason
+    if result.attempts > 1:
+        result.retry_reason = last_reason
     return result
