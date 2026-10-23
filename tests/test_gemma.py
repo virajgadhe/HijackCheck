@@ -243,6 +243,11 @@ def test_empty_max_tokens_response_is_retried(monkeypatch):
     assert report.retried is True
     assert report.retry_reasons == ["empty_response_max_tokens"]
     assert len(client.models.calls) == 2
+    attempts = report.response_diagnostics["attempts"]
+    assert attempts[0]["outcome"] == "empty"
+    assert attempts[0]["finish_reason"] == "MAX_TOKENS"
+    assert attempts[1]["outcome"] == "text"
+    assert report.response_diagnostics["request_timeout_ms"] == 90_000
 
 
 def test_persistent_empty_max_tokens_response_is_reported(monkeypatch):
@@ -271,6 +276,10 @@ def test_transient_server_error_is_retried(monkeypatch):
     assert report.success is True
     assert report.attempts == 2
     assert report.retry_reasons == ["api_server_error"]
+    attempts = report.response_diagnostics["attempts"]
+    assert attempts[0]["error_type"] == "api_server_error"
+    assert attempts[0]["exception"] == "ServerError"
+    assert attempts[1]["outcome"] == "text"
 
 
 def test_client_uses_bounded_request_timeout(monkeypatch):

@@ -277,8 +277,12 @@ def run_condition(
         )
     config = types.GenerateContentConfig(**config_kwargs)
 
+    attempt_log = []
+    request_timeout_ms = _request_timeout_ms()
+
     for attempt in range(1, MAX_ATTEMPTS + 1):
         report.attempts = attempt
+        started = time.monotonic()
         try:
             response = client.models.generate_content(
                 model=model,
@@ -287,6 +291,19 @@ def run_condition(
             )
         except Exception as exc:
             error_type = _classify_error(exc)
+            attempt_log.append(
+                {
+                    "attempt": attempt,
+                    "outcome": "error",
+                    "error_type": error_type,
+                    "exception": type(exc).__name__,
+                    "elapsed_ms": round((time.monotonic() - started) * 1000),
+                }
+            )
+            report.response_diagnostics = {
+                "request_timeout_ms": request_timeout_ms,
+                "attempts": attempt_log,
+            }
             if attempt < MAX_ATTEMPTS and error_type in RETRYABLE_ERROR_TYPES:
                 report.retry_reasons.append(error_type)
                 time.sleep(RETRY_DELAY_SECONDS * attempt)
@@ -296,10 +313,23 @@ def run_condition(
             report.error = _safe_error(exc, api_key)
             return report
 
+        elapsed_ms = round((time.monotonic() - started) * 1000)
         text, finish_reason, usage, diagnostics = _read_response(response)
+        attempt_log.append(
+            {
+                "attempt": attempt,
+                "outcome": "text" if text.strip() else "empty",
+                "finish_reason": finish_reason,
+                "elapsed_ms": elapsed_ms,
+            }
+        )
         report.finish_reason = finish_reason
         report.usage = usage
-        report.response_diagnostics = diagnostics
+        report.response_diagnostics = {
+            **diagnostics,
+            "request_timeout_ms": request_timeout_ms,
+            "attempts": attempt_log,
+        }
 
         if text.strip():
             report.response_text = text.strip()
