@@ -162,9 +162,11 @@ def test_api_errors_are_classified(code, status, expected):
     assert report.success is False
     assert report.error_type == expected
     assert "secret-key" not in (report.error or "")
+    assert "secret-key" not in json.dumps(report.response_diagnostics)
 
 
-def test_server_error_is_classified():
+def test_server_error_is_classified(monkeypatch):
+    monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
     exception = errors.ServerError(
         500,
         {"error": {"code": 500, "status": "INTERNAL", "message": "API failure"}},
@@ -192,23 +194,25 @@ def test_persistent_server_error_remains_a_failure(monkeypatch):
         500,
         {"error": {"code": 500, "status": "INTERNAL", "message": "API failure"}},
     )
-    client = SequenceClient([exception, exception])
+    client = SequenceClient([exception, exception, exception])
 
     report = run_baseline(TASK, make_pages(), api_key="test-key", client=client)
 
     assert report.success is False
     assert report.response_text is None
     assert report.error_type == "api_server_error"
-    assert report.attempts == 2
+    assert report.attempts == 3
     assert report.retried is True
-    assert report.retry_reasons == ["api_server_error"]
+    assert report.retry_reasons == ["api_server_error", "api_server_error"]
     attempts = report.response_diagnostics["attempts"]
-    assert [item["http_status"] for item in attempts] == [500, 500]
+    assert [item["http_status"] for item in attempts] == [500, 500, 500]
     assert all(item["retryable"] is True for item in attempts)
+    assert all(item["message"] == report.error for item in attempts)
     assert report.response_diagnostics["request_timeout_ms"] == 90_000
 
 
-def test_network_error_is_classified():
+def test_network_error_is_classified(monkeypatch):
+    monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
     report = run_baseline(
         TASK,
         make_pages(),
@@ -279,15 +283,187 @@ def test_empty_max_tokens_response_is_retried(monkeypatch):
 
 def test_persistent_empty_max_tokens_response_is_reported(monkeypatch):
     monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
-    client = SequenceClient([max_tokens_response(), max_tokens_response()])
+    client = SequenceClient(
+        [max_tokens_response(), max_tokens_response(), max_tokens_response()]
+    )
 
     report = run_baseline(TASK, make_pages(), api_key="test-key", client=client)
 
     assert report.success is False
     assert report.error_type == "empty_response"
-    assert report.attempts == 2
+    assert report.attempts == 3
+    assert report.retry_reasons == [
+        "empty_response_max_tokens",
+        "empty_response_max_tokens",
+    ]
     assert "MAX_TOKENS" in report.error
     assert "4093" in report.error
+
+
+def empty_stop_response():
+    return SimpleNamespace(
+        text="",
+        candidates=[
+            SimpleNamespace(
+                finish_reason=SimpleNamespace(name="STOP"),
+                content=SimpleNamespace(parts=[]),
+            )
+        ],
+        usage_metadata=None,
+    )
+
+
+def safety_blocked_response():
+    return SimpleNamespace(
+        text="",
+        candidates=[
+            SimpleNamespace(
+                finish_reason=SimpleNamespace(name="SAFETY"),
+                content=SimpleNamespace(parts=[]),
+            )
+        ],
+        usage_metadata=None,
+    )
+
+
+def test_empty_stop_response_is_retried_once(monkeypatch):
+    monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
+    client = SequenceClient([empty_stop_response(), FakeResponse("Laptop B fits.")])
+
+    report = run_baseline(TASK, make_pages(), api_key="test-key", client=client)
+
+    assert report.success is True
+    assert report.attempts == 2
+    assert report.retry_reasons == ["empty_response"]
+    assert report.response_diagnostics["attempts"][0]["outcome"] == "empty"
+
+
+def test_safety_blocked_empty_response_is_not_retried(monkeypatch):
+    monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
+    client = SequenceClient([safety_blocked_response()])
+
+    report = run_baseline(TASK, make_pages(), api_key="test-key", client=client)
+
+    assert report.success is False
+    assert report.error_type == "empty_response"
+    assert report.attempts == 1
+    assert report.retry_reasons == []
+    assert report.response_diagnostics["finish_reason"] == "SAFETY"
+
+
+def test_transient_timeout_is_retried(monkeypatch):
+    monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
+    client = SequenceClient(
+        [httpx.ReadTimeout("read timed out"), FakeResponse("Laptop B fits.")]
+    )
+
+    report = run_baseline(TASK, make_pages(), api_key="test-key", client=client)
+
+    assert report.success is True
+    assert report.attempts == 2
+    assert report.retry_reasons == ["timeout_error"]
+    attempts = report.response_diagnostics["attempts"]
+    assert attempts[0]["error_type"] == "timeout_error"
+    assert attempts[0]["retryable"] is True
+
+
+def test_permanent_request_error_is_not_retried(monkeypatch):
+    monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
+    exception = errors.ClientError(
+        400,
+        {"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": "bad request"}},
+    )
+    client = SequenceClient([exception])
+
+    report = run_baseline(TASK, make_pages(), api_key="test-key", client=client)
+
+    assert report.success is False
+    assert report.error_type == "api_client_error"
+    assert report.attempts == 1
+    assert report.retry_reasons == []
+    assert len(client.models.calls) == 1
+
+
+def test_quota_error_is_not_retried(monkeypatch):
+    monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
+    exception = errors.ClientError(
+        429,
+        {
+            "error": {
+                "code": 429,
+                "status": "RESOURCE_EXHAUSTED",
+                "message": "quota exceeded",
+            }
+        },
+    )
+    client = SequenceClient([exception])
+
+    report = run_baseline(TASK, make_pages(), api_key="test-key", client=client)
+
+    assert report.success is False
+    assert report.error_type == "quota_error"
+    assert report.attempts == 1
+    assert report.retry_reasons == []
+    assert len(client.models.calls) == 1
+
+
+def test_safe_error_redacts_keys_and_bearer_tokens():
+    secret = "redaction-secret"
+
+    message = gemma._safe_error(
+        RuntimeError(
+            f"request failed: https://example.test/v1?key={secret} "
+            f"Authorization: Bearer {secret} api_key={secret}"
+        ),
+        None,
+    )
+
+    assert secret not in message
+    assert "[REDACTED]" in message
+
+
+def test_invalid_generation_settings_are_rejected_before_the_call():
+    client = FakeClient(FakeResponse("unused"))
+
+    report = run_baseline(
+        TASK,
+        make_pages(),
+        api_key="test-key",
+        client=client,
+        settings=GenerationSettings(temperature=2.5),
+    )
+
+    assert report.success is False
+    assert report.error_type == "configuration_error"
+    assert "temperature" in report.error
+    assert report.attempts == 0
+    assert client.models.calls == []
+
+
+def test_unparseable_provider_response_is_safely_reported(monkeypatch):
+    secret = "parse-secret"
+    monkeypatch.setattr(
+        gemma,
+        "_read_response",
+        lambda response: (_ for _ in ()).throw(
+            ValueError(f"broken payload api_key={secret}")
+        ),
+    )
+
+    report = run_baseline(
+        TASK,
+        make_pages(),
+        api_key=secret,
+        client=FakeClient(FakeResponse("unused")),
+    )
+
+    assert report.success is False
+    assert report.error_type == "response_parse_error"
+    assert secret not in report.error
+    attempt = report.response_diagnostics["attempts"][0]
+    assert attempt["outcome"] == "parse_error"
+    assert attempt["retryable"] is False
+    assert secret not in json.dumps(report.response_diagnostics)
 
 
 def test_transient_server_error_is_retried(monkeypatch):
@@ -330,7 +506,8 @@ def test_client_uses_bounded_request_timeout(monkeypatch):
     assert captured["http_options"].timeout == 45000
 
 
-def test_empty_response_is_rejected():
+def test_empty_response_is_rejected(monkeypatch):
+    monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
     report = run_baseline(
         TASK,
         make_pages(),

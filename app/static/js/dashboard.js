@@ -169,33 +169,48 @@
     node.className = `badge ${tone || ""}`.trim();
   }
 
+  function attemptNote(report) {
+    const attempts = Number(report.attempts || 0);
+    if (attempts <= 1) return "";
+    return ` ${attempts} attempts were made; per-attempt diagnostics are in the saved report.`;
+  }
+
   function friendlyError(report) {
     if (!report) return "No report was returned.";
     const type = report.error_type || "error";
+    let message;
     if (type === "missing_api_key") {
-      return "No Gemma API key is configured. The run is recorded as incomplete.";
-    }
-    if (type === "authentication_error") {
-      return "Gemma rejected the configured API key. Check the server credentials.";
-    }
-    if (type === "quota_error") {
-      return "Gemma quota was exceeded. The failed run is recorded; retry later.";
-    }
-    if (type === "model_unavailable") {
-      return "The configured Gemma model is unavailable. Check the model setting.";
-    }
-    if (type === "api_server_error") {
+      message = "No Gemma API key is configured. The run is recorded as incomplete.";
+    } else if (type === "authentication_error") {
+      message = "Gemma rejected the configured API key. Check GOOGLE_API_KEY or GEMINI_API_KEY on the server.";
+    } else if (type === "quota_error") {
+      message = "Gemma quota or rate limit was exceeded. The failed run is recorded; wait before retrying.";
+    } else if (type === "model_unavailable") {
+      message = "The configured Gemma model is unavailable. Check GEMMA_MODEL.";
+    } else if (type === "configuration_error") {
+      message = "The model request settings are invalid. Check the GEMMA_* configuration and restart the server.";
+    } else if (type === "api_server_error") {
       const detail = report.error ? ` (${truncate(report.error, 120)})` : "";
-      return `Gemma returned a provider server error${detail}. The failure is recorded; retry this mode later.`;
+      message = `Gemma returned a provider server error${detail}. The failure is recorded; retry this mode later.`;
+    } else if (type === "network_error") {
+      message = "The model request failed because of a network error. Check connectivity and retry this mode.";
+    } else if (type === "timeout_error") {
+      message = "The model request timed out. The failure is recorded; retry this mode or raise GEMMA_REQUEST_TIMEOUT_MS.";
+    } else if (type === "api_client_error" || type === "api_error") {
+      message = "Gemma rejected the model request. The request was not retried automatically; see the saved report for the provider response.";
+    } else if (type === "transient_client_error") {
+      message = "Gemma returned a transient client error after the bounded retries. Retry this mode later.";
+    } else if (type === "response_parse_error") {
+      message = "Gemma returned a response that could not be parsed safely. It was not treated as a successful answer.";
+    } else if (type === "empty_response") {
+      const detail = report.error ? ` ${truncate(report.error, 180)}` : "";
+      message = `Gemma returned no usable text.${detail}`;
+    } else if (report.error) {
+      message = truncate(report.error, 220);
+    } else {
+      message = `The run failed with ${type}. See the saved JSON report for details.`;
     }
-    if (type === "network_error") {
-      return "The model request failed because of a network error. The failure is recorded.";
-    }
-    if (type === "empty_response") {
-      return "Gemma returned no text. The empty response is recorded.";
-    }
-    if (report.error) return truncate(report.error, 220);
-    return `The run failed with ${type}. See the saved JSON report for details.`;
+    return `${message}${attemptNote(report)}`;
   }
 
   function summarizeApiError(text) {
@@ -203,8 +218,12 @@
     if (value.includes("missing_api_key")) return "A condition had no API key configured.";
     if (value.includes("api_server_error")) return truncate(`A condition hit a Gemma provider server error: ${value}`, 220);
     if (value.includes("authentication_error")) return "A condition hit an authentication error.";
-    if (value.includes("quota_error")) return "A condition hit a quota error.";
+    if (value.includes("quota_error")) return "A condition hit a quota or rate-limit error.";
     if (value.includes("network_error")) return "A condition hit a network error.";
+    if (value.includes("timeout_error")) return "A condition timed out.";
+    if (value.includes("configuration_error")) return "A condition had invalid model configuration.";
+    if (value.includes("response_parse_error")) return "A condition returned an unparseable response.";
+    if (value.includes("empty_response")) return "A condition returned no usable text.";
     return truncate(value, 180);
   }
 

@@ -504,7 +504,7 @@ def test_saved_model_failure_remains_visible_and_comparison_is_incomplete(
     assert "baseline api_server_error" in comparison.api_errors[0]
 
 
-def make_app(tmp_path, monkeypatch, controlled_url):
+def make_app(tmp_path, monkeypatch, controlled_url, *, fail_baseline=False):
     monkeypatch.setattr(experiment_module, "validate_url", fake_validate)
     app = create_app()
     app.config.update(
@@ -526,7 +526,9 @@ def make_app(tmp_path, monkeypatch, controlled_url):
             **kwargs,
         )
 
-    baseline_runner, protected_runner = make_runners(captured)
+    baseline_runner, protected_runner = make_runners(
+        captured, fail_baseline=fail_baseline
+    )
 
     def run_wrapper(snapshot_id, condition, **kwargs):
         return original_run(
@@ -540,6 +542,32 @@ def make_app(tmp_path, monkeypatch, controlled_url):
     monkeypatch.setattr(routes_module, "capture_evidence", capture_wrapper)
     monkeypatch.setattr(routes_module, "run_saved_condition", run_wrapper)
     return app, captured
+
+
+def test_mode_route_records_provider_failure_without_crashing(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.gemma.time.sleep", lambda seconds: None)
+    with create_app().test_request_context():
+        controlled_url = url_for("main.attack_page", _external=True)
+    app, _ = make_app(tmp_path, monkeypatch, controlled_url, fail_baseline=True)
+    client = app.test_client()
+    urls = [URLS[0], URLS[1], controlled_url]
+
+    capture_response = client.post("/api/capture", json={"task": BUDGET_TASK, "urls": urls})
+    snapshot_id = capture_response.get_json()["snapshot"]["snapshot_id"]
+
+    response = client.post("/api/run/baseline", json={"snapshot_id": snapshot_id})
+    data = response.get_json()
+
+    assert response.status_code == 502
+    report = data["report"]
+    assert report["success"] is False
+    assert report["response_text"] is None
+    assert report["error_type"] == "api_server_error"
+    assert report["attempts"] == 3
+    assert len(report["retry_reasons"]) == 2
+    assert all(item["http_status"] == 500 for item in report["response_diagnostics"]["attempts"])
+    assert data["report_urls"]["baseline"].startswith("/api/reports/baseline-")
+    assert list(tmp_path.glob("baseline-*.json"))
 
 
 def test_capture_and_mode_endpoints_are_independent_and_serve_reports(tmp_path, monkeypatch):

@@ -14,9 +14,21 @@ from app.schemas import BaselineReport, DetectionResult, EvidencePage, Generatio
 DEFAULT_MODEL = "gemma-4-26b-a4b-it"
 DEFAULT_REQUEST_TIMEOUT_MS = 90_000
 MAX_ERROR_LENGTH = 1500
-MAX_ATTEMPTS = 2
+MAX_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 0.6
-RETRYABLE_ERROR_TYPES = {"api_server_error", "network_error", "timeout_error"}
+RETRYABLE_ERROR_TYPES = {
+    "api_server_error",
+    "network_error",
+    "timeout_error",
+    "transient_client_error",
+}
+EMPTY_RETRY_BLOCK_FINISH_REASONS = {
+    "SAFETY",
+    "RECITATION",
+    "BLOCKLIST",
+    "PROHIBITED_CONTENT",
+    "SPII",
+}
 
 
 def build_baseline_prompt(task: str, pages: Sequence[EvidencePage]) -> str:
@@ -74,8 +86,34 @@ def _safe_error(exc: Exception, api_key: str | None) -> str:
     message = str(exc)
     if api_key:
         message = message.replace(api_key, "[REDACTED]")
-    message = re.sub(r"(?i)(api[_-]?key|token|secret)\s*[=:]\s*\S+", r"\1=[REDACTED]", message)
+    message = re.sub(
+        r"(?i)(api[_-]?key|token|secret)\s*[=:]\s*\S+",
+        r"\1=[REDACTED]",
+        message,
+    )
+    message = re.sub(
+        r"(?i)([?&](?:key|api_key)=)[^&\s]+",
+        r"\1[REDACTED]",
+        message,
+    )
+    message = re.sub(
+        r"(?i)(authorization\s*[=:]\s*bearer\s+)\S+",
+        r"\1[REDACTED]",
+        message,
+    )
     return message[:MAX_ERROR_LENGTH]
+
+
+def _settings_error(settings: GenerationSettings) -> str | None:
+    if not 0.0 <= settings.temperature <= 2.0:
+        return "temperature must be between 0.0 and 2.0."
+    if not 0.0 <= settings.top_p <= 1.0:
+        return "top_p must be between 0.0 and 1.0."
+    if settings.max_output_tokens < 1:
+        return "max_output_tokens must be at least 1."
+    if not settings.thinking_level.strip():
+        return "thinking_level must not be empty."
+    return None
 
 
 def _error_http_status(exc: Exception) -> int | None:
@@ -96,12 +134,18 @@ def _classify_error(exc: Exception) -> str:
             return "quota_error"
         if code == 404:
             return "model_unavailable"
+        if code == 408:
+            return "timeout_error"
+        if code == 425:
+            return "transient_client_error"
         return "api_client_error"
     if isinstance(exc, errors.ServerError):
         return "api_server_error"
     if isinstance(exc, errors.APIError):
         return "api_error"
-    if isinstance(exc, (httpx.HTTPError, TimeoutError, OSError)):
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        return "timeout_error"
+    if isinstance(exc, (httpx.HTTPError, OSError)):
         return "network_error"
     return "unexpected_error"
 
@@ -185,6 +229,15 @@ def _read_response(response: object) -> tuple[str, str | None, dict | None, dict
         "text_returned": bool(text.strip()),
     }
     return text, finish_reason, usage, diagnostics
+
+
+def _empty_response_is_retryable(
+    finish_reason: str | None, diagnostics: dict
+) -> bool:
+    return (
+        finish_reason not in EMPTY_RETRY_BLOCK_FINISH_REASONS
+        and not diagnostics.get("prompt_block_reason")
+    )
 
 
 def _empty_response_message(finish_reason: str | None, diagnostics: dict) -> str:
@@ -272,6 +325,18 @@ def run_condition(
             report.error = _safe_error(exc, api_key)
             return report
 
+    attempt_log = []
+    request_timeout_ms = _request_timeout_ms()
+    settings_problem = _settings_error(settings)
+    if settings_problem:
+        report.error_type = "configuration_error"
+        report.error = f"Invalid generation settings: {settings_problem}"
+        report.response_diagnostics = {
+            "request_timeout_ms": request_timeout_ms,
+            "attempts": attempt_log,
+        }
+        return report
+
     config_kwargs = {
         "temperature": settings.temperature,
         "top_p": settings.top_p,
@@ -284,10 +349,19 @@ def run_condition(
         config_kwargs["thinking_config"] = types.ThinkingConfig(
             thinking_level=settings.thinking_level.upper()
         )
-    config = types.GenerateContentConfig(**config_kwargs)
-
-    attempt_log = []
-    request_timeout_ms = _request_timeout_ms()
+    try:
+        config = types.GenerateContentConfig(**config_kwargs)
+    except Exception as exc:
+        report.error_type = "configuration_error"
+        report.error = (
+            "The model request configuration is invalid: "
+            f"{_safe_error(exc, api_key)}"
+        )
+        report.response_diagnostics = {
+            "request_timeout_ms": request_timeout_ms,
+            "attempts": attempt_log,
+        }
+        return report
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         report.attempts = attempt
@@ -300,6 +374,7 @@ def run_condition(
             )
         except Exception as exc:
             error_type = _classify_error(exc)
+            provider_status = getattr(exc, "status", None)
             attempt_log.append(
                 {
                     "attempt": attempt,
@@ -307,6 +382,10 @@ def run_condition(
                     "error_type": error_type,
                     "exception": type(exc).__name__,
                     "http_status": _error_http_status(exc),
+                    "provider_status": (
+                        str(provider_status)[:200] if provider_status else None
+                    ),
+                    "message": _safe_error(exc, api_key),
                     "retryable": error_type in RETRYABLE_ERROR_TYPES,
                     "elapsed_ms": round((time.monotonic() - started) * 1000),
                 }
@@ -325,12 +404,41 @@ def run_condition(
             return report
 
         elapsed_ms = round((time.monotonic() - started) * 1000)
-        text, finish_reason, usage, diagnostics = _read_response(response)
+        try:
+            text, finish_reason, usage, diagnostics = _read_response(response)
+        except Exception as exc:
+            attempt_log.append(
+                {
+                    "attempt": attempt,
+                    "outcome": "parse_error",
+                    "error_type": "response_parse_error",
+                    "exception": type(exc).__name__,
+                    "message": _safe_error(exc, api_key),
+                    "retryable": False,
+                    "elapsed_ms": elapsed_ms,
+                }
+            )
+            report.response_diagnostics = {
+                "request_timeout_ms": request_timeout_ms,
+                "attempts": attempt_log,
+            }
+            report.error_type = "response_parse_error"
+            report.error = (
+                "The provider response could not be parsed safely and was not "
+                f"treated as a successful result: {_safe_error(exc, api_key)}"
+            )
+            return report
+
         attempt_log.append(
             {
                 "attempt": attempt,
                 "outcome": "text" if text.strip() else "empty",
                 "finish_reason": finish_reason,
+                "candidate_count": diagnostics.get("candidate_count"),
+                "text_part_count": diagnostics.get("text_part_count"),
+                "thought_part_count": diagnostics.get("thought_part_count"),
+                "thoughts_token_count": diagnostics.get("thoughts_token_count"),
+                "prompt_block_reason": diagnostics.get("prompt_block_reason"),
                 "elapsed_ms": elapsed_ms,
             }
         )
@@ -348,8 +456,15 @@ def run_condition(
             report.retried = attempt > 1
             return report
 
-        if attempt < MAX_ATTEMPTS and finish_reason == "MAX_TOKENS":
-            report.retry_reasons.append("empty_response_max_tokens")
+        if attempt < MAX_ATTEMPTS and _empty_response_is_retryable(
+            finish_reason, diagnostics
+        ):
+            retry_reason = (
+                "empty_response_max_tokens"
+                if finish_reason == "MAX_TOKENS"
+                else "empty_response"
+            )
+            report.retry_reasons.append(retry_reason)
             time.sleep(RETRY_DELAY_SECONDS * attempt)
             continue
 
