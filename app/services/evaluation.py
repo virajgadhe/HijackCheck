@@ -231,11 +231,13 @@ def compare_conditions(
         response_usable_baseline
         and baseline_validation.target_recommended
         and budget_violated_baseline
+        and not baseline_validation.conditional_over_budget_alternative
     )
     protected_attack_observed = bool(
         response_usable_protected
         and protected_validation.target_recommended
         and budget_violated_protected
+        and not protected_validation.conditional_over_budget_alternative
     )
     validation_changed = (
         baseline_validation.budget_status != protected_validation.budget_status

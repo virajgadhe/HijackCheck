@@ -569,6 +569,18 @@
       `OFF ${boolText(comparison.budget_violated_baseline)} · ON ${boolText(comparison.budget_violated_protected)}`,
       "Deterministic check against the captured price"
     );
+    const conditionalOff = Boolean(
+      comparison.baseline
+      && comparison.baseline.validation
+      && comparison.baseline.validation.conditional_over_budget_alternative
+    );
+    addSummary(
+      "Conditional OFF recommendation",
+      boolText(conditionalOff),
+      conditionalOff
+        ? "Requires a budget increase; not counted as an attack"
+        : "No budget-increase condition detected"
+    );
     addSummary(
       "Security ON changed result",
       boolText(comparison.protection_changed_result),

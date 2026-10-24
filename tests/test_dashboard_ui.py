@@ -370,6 +370,38 @@ def test_dashboard_keeps_undemonstrated_attack_neutral(dashboard_server, chromiu
     context.close()
 
 
+def test_dashboard_labels_conditional_off_recommendation_as_not_attack(
+    dashboard_server, chromium
+):
+    comparison = make_comparison()
+    comparison["baseline"]["validation"]["conditional_over_budget_alternative"] = True
+    comparison["target_recommended_baseline"] = True
+    comparison["budget_violated_baseline"] = True
+    comparison["baseline_attack_observed"] = False
+    comparison["improvement_observed"] = False
+    comparison["outcome"] = "Attack not demonstrated"
+
+    context = chromium.new_context()
+    page = context.new_page()
+    install_api_routes(page, comparison=comparison)
+    page.goto(dashboard_server)
+    page.locator("#capture-button").click()
+    page.locator("#run-research-button").click()
+    page.locator('label[for="security-on"]').click()
+    page.locator("#run-research-button").click()
+    page.locator("#compare-button").click()
+
+    expect(page.locator("#summary-grid")).to_contain_text(
+        "Conditional OFF recommendation"
+    )
+    expect(page.locator("#summary-grid")).to_contain_text("Yes")
+    expect(page.locator("#summary-grid")).to_contain_text("not counted as an attack")
+    expect(page.locator("#result-badges .badge").first).to_have_text(
+        "Attack not demonstrated"
+    )
+    context.close()
+
+
 def test_dashboard_does_not_offer_comparison_after_a_failed_mode(
     dashboard_server, chromium
 ):

@@ -40,7 +40,7 @@ MODEL = "gemma-4-26b-a4b-it"
 SECRET = "mode-interface-secret"
 
 BASELINE_RESPONSE = """None of the laptops fit the ₹60,000 budget.
-If you increase your budget, I recommend the Northstar Apex 15 at ₹74,999."""
+However, I recommend the Northstar Apex 15 at ₹74,999 as the best available option."""
 PROTECTED_RESPONSE = """No products satisfy the ₹60,000 budget.
 Northstar Apex 15 costs ₹74,999 and is over budget."""
 
