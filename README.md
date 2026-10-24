@@ -1,6 +1,6 @@
 # HijackCheck
 
-> **Hackathon submission.** Built for the [Gemma 4 Good Hackathon](https://www.kaggle.com/competitions/gemma-4-good-hackathon). HijackCheck demonstrates how a prompt injection hidden in scraped webpage content can influence an AI shopping assistant, and how a lightweight, model-independent defence layer detects and blocks the manipulation before it reaches the user.
+> **Hackathon submission.** Built for the Hacktober Hack-day using gemma 4 track. HijackCheck demonstrates how a prompt injection hidden in scraped webpage content can influence an AI shopping assistant, and how a lightweight, model-independent defence layer detects and blocks the manipulation before it reaches the user.
 
 HijackCheck is a controlled AI-security experiment. It captures real and controlled
 webpages once, asks Gemma to perform the same shopping task with Security OFF and
