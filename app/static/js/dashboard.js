@@ -2,9 +2,8 @@
   "use strict";
 
   const captureForm = document.getElementById("capture-form");
+  const promptInput = document.getElementById("prompt");
   const captureButton = document.getElementById("capture-button");
-  const attackUrl = document.getElementById("attack-url");
-  const attackVariant = document.getElementById("attack-variant");
   const runResearchButton = document.getElementById("run-research-button");
   const compareButton = document.getElementById("compare-button");
   const modeInputs = Array.from(document.querySelectorAll('input[name="security_mode"]'));
@@ -15,11 +14,14 @@
   const selectedModeLabel = document.getElementById("selected-mode-label");
   const selectedModeDescription = document.getElementById("selected-mode-description");
 
+  const conversation = document.getElementById("conversation");
+  const submittedPrompt = document.getElementById("submitted-prompt");
   const snapshotPanel = document.getElementById("snapshot-panel");
   const sourceGrid = document.getElementById("source-grid");
   const snapshotNote = document.getElementById("snapshot-note");
   const controlledNote = document.getElementById("controlled-note");
   const snapshotReportLinks = document.getElementById("snapshot-report-links");
+  const variantStatus = document.getElementById("variant-status");
 
   const modePanel = document.getElementById("mode-panel");
   const baselineModeStatus = document.getElementById("baseline-mode-status");
@@ -52,6 +54,7 @@
     baseline: null,
     protected: null,
     comparison: null,
+    submittedPrompt: "",
     busy: false,
   };
 
@@ -82,6 +85,12 @@
     comparison: "Comparison",
   };
 
+  const VARIANT_LABELS = {
+    visible: "Visible variant",
+    hidden: "Hidden DOM variant",
+    control: "Control variant",
+  };
+
   function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -95,35 +104,6 @@
 
   function setHidden(node, hidden) {
     node.hidden = hidden;
-  }
-
-  function syncVariantUrl() {
-    if (!attackUrl || !attackVariant) return;
-    let url;
-    try {
-      url = new URL(attackUrl.value, window.location.origin);
-    } catch (error) {
-      return;
-    }
-    if (attackVariant.value === "visible") {
-      url.searchParams.delete("variant");
-    } else {
-      url.searchParams.set("variant", attackVariant.value);
-    }
-    attackUrl.value = url.toString();
-  }
-
-  function syncVariantFromUrl() {
-    if (!attackUrl || !attackVariant) return;
-    let url;
-    try {
-      url = new URL(attackUrl.value, window.location.origin);
-    } catch (error) {
-      return;
-    }
-    const requested = url.searchParams.get("variant") || "visible";
-    const supported = Array.from(attackVariant.options).some((option) => option.value === requested);
-    if (supported) attackVariant.value = requested;
   }
 
   function getSelectedCondition() {
@@ -167,6 +147,25 @@
   function setBadge(node, text, tone) {
     node.textContent = text;
     node.className = `badge ${tone || ""}`.trim();
+  }
+
+  function safeHttpUrl(value) {
+    try {
+      const url = new URL(String(value || ""), window.location.origin);
+      return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function hostFor(value) {
+    const href = safeHttpUrl(value);
+    if (!href) return String(value || "");
+    try {
+      return new URL(href).host;
+    } catch (error) {
+      return href;
+    }
   }
 
   function attemptNote(report) {
@@ -227,23 +226,6 @@
     return truncate(value, 180);
   }
 
-  function addSummary(label, value, detail) {
-    const card = el("article", "summary-card");
-    card.append(el("span", "label", label), el("span", "value", value));
-    if (detail) card.append(el("span", "detail", detail));
-    summaryGrid.append(card);
-  }
-
-  function addFlag(label, value, extraClass) {
-    const card = el("article", `flag-card ${extraClass || ""}`.trim());
-    card.append(el("span", "flag-label", label), el("span", "flag-value", value));
-    instructionFlags.append(card);
-  }
-
-  function sourceLabel(index) {
-    return `Resource ${index + 1}`;
-  }
-
   function renderReportLinks(container, reportUrls, order) {
     clear(container);
     if (!reportUrls) return;
@@ -259,39 +241,283 @@
     });
   }
 
-  function renderSources(snapshot) {
-    clear(sourceGrid);
-    snapshot.pages.forEach((page, index) => {
-      const row = el("article", `resource-row ${page.success ? "ok" : "fail"}`);
-      const top = el("div", "resource-topline");
-      const label = page.partial ? "Partial" : page.success ? "Extracted" : "Failed";
-      const tone = page.partial ? "warning" : page.success ? "success" : "danger";
-      top.append(
-        el("span", "resource-index", sourceLabel(index)),
-        el("span", `badge ${tone}`, label)
-      );
-      row.append(top);
-      row.append(el("h3", "", page.title || "Untitled page"));
-      row.append(el("span", "resource-url", page.final_url || page.url));
-      if (page.success) {
-        const attempts = page.attempts && page.attempts > 1 ? ` · ${page.attempts} attempts` : "";
-        const httpStatus = page.http_status ? ` · HTTP ${page.http_status}` : "";
-        const method = page.extraction_method === "dom" ? "DOM text" : "visible text";
-        row.append(el("span", "resource-detail", `${page.text.length.toLocaleString()} characters captured as ${method}${httpStatus}${attempts}`));
-        if (page.warning || page.retry_reason) {
-          row.append(el("p", "resource-note", page.warning || page.retry_reason));
+  function appendInline(parent, text) {
+    const tokenPattern = /(\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\*[^*\n]+\*|_[^_\n]+_|\[[^\]\n]+\]\([^)\s]+\))/g;
+    let cursor = 0;
+    const source = String(text || "");
+    let match;
+    while ((match = tokenPattern.exec(source)) !== null) {
+      if (match.index > cursor) {
+        parent.append(document.createTextNode(source.slice(cursor, match.index)));
+      }
+      const token = match[0];
+      if (token.startsWith("**") || token.startsWith("__")) {
+        parent.append(el("strong", "", token.slice(2, -2)));
+      } else if (token.startsWith("`")) {
+        parent.append(el("code", "", token.slice(1, -1)));
+      } else if (token.startsWith("[")) {
+        const linkMatch = token.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
+        const href = linkMatch ? safeHttpUrl(linkMatch[2]) : null;
+        if (linkMatch && href) {
+          const link = el("a", "", linkMatch[1]);
+          link.href = href;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          parent.append(link);
+        } else {
+          parent.append(document.createTextNode(token));
         }
       } else {
-        row.append(el("p", "resource-error", page.error || "Extraction failed without a recorded error."));
+        parent.append(el("em", "", token.slice(1, -1)));
       }
-      sourceGrid.append(row);
+      cursor = match.index + token.length;
+    }
+    if (cursor < source.length) {
+      parent.append(document.createTextNode(source.slice(cursor)));
+    }
+  }
+
+  function appendTextWithBreaks(parent, text) {
+    const lines = String(text || "").split("\n");
+    lines.forEach((line, index) => {
+      if (index) parent.append(document.createElement("br"));
+      appendInline(parent, line);
+    });
+  }
+
+  function isTableSeparator(line) {
+    return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+  }
+
+  function splitTableRow(line) {
+    let row = line.trim();
+    if (row.startsWith("|")) row = row.slice(1);
+    if (row.endsWith("|")) row = row.slice(0, -1);
+    return row.split("|").map((cell) => cell.trim());
+  }
+
+  function renderMarkdown(container, text) {
+    const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+    let index = 0;
+
+    while (index < lines.length) {
+      const line = lines[index];
+      if (!line.trim()) {
+        index += 1;
+        continue;
+      }
+
+      const fence = line.match(/^\s*```/);
+      if (fence) {
+        const codeLines = [];
+        index += 1;
+        while (index < lines.length && !/^\s*```/.test(lines[index])) {
+          codeLines.push(lines[index]);
+          index += 1;
+        }
+        if (index < lines.length) index += 1;
+        const pre = el("pre");
+        pre.append(el("code", "", codeLines.join("\n")));
+        container.append(pre);
+        continue;
+      }
+
+      if (line.includes("|") && index + 1 < lines.length && isTableSeparator(lines[index + 1])) {
+        const table = el("table");
+        const thead = el("thead");
+        const headRow = el("tr");
+        splitTableRow(line).forEach((cell) => {
+          const th = el("th");
+          appendInline(th, cell);
+          headRow.append(th);
+        });
+        thead.append(headRow);
+        table.append(thead);
+        const tbody = el("tbody");
+        index += 2;
+        while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
+          const row = el("tr");
+          splitTableRow(lines[index]).forEach((cell) => {
+            const td = el("td");
+            appendInline(td, cell);
+            row.append(td);
+          });
+          tbody.append(row);
+          index += 1;
+        }
+        table.append(tbody);
+        container.append(table);
+        continue;
+      }
+
+      const heading = line.match(/^(#{1,4})\s+(.*)$/);
+      if (heading) {
+        const tag = `h${Math.min(heading[1].length + 1, 4)}`;
+        const node = el(tag);
+        appendInline(node, heading[2]);
+        container.append(node);
+        index += 1;
+        continue;
+      }
+
+      if (/^\s*>/.test(line)) {
+        const quoteLines = [];
+        while (index < lines.length && /^\s*>/.test(lines[index])) {
+          quoteLines.push(lines[index].replace(/^\s*>\s?/, ""));
+          index += 1;
+        }
+        const quote = el("blockquote");
+        appendTextWithBreaks(quote, quoteLines.join("\n"));
+        container.append(quote);
+        continue;
+      }
+
+      const unordered = line.match(/^\s*[-*+]\s+(.*)$/);
+      if (unordered) {
+        const list = el("ul");
+        while (index < lines.length) {
+          const item = lines[index].match(/^\s*[-*+]\s+(.*)$/);
+          if (!item) break;
+          const li = el("li");
+          appendInline(li, item[1]);
+          list.append(li);
+          index += 1;
+        }
+        container.append(list);
+        continue;
+      }
+
+      const ordered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+      if (ordered) {
+        const list = el("ol");
+        while (index < lines.length) {
+          const item = lines[index].match(/^\s*\d+[.)]\s+(.*)$/);
+          if (!item) break;
+          const li = el("li");
+          appendInline(li, item[1]);
+          list.append(li);
+          index += 1;
+        }
+        container.append(list);
+        continue;
+      }
+
+      if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
+        container.append(el("hr"));
+        index += 1;
+        continue;
+      }
+
+      const paragraphLines = [];
+      while (index < lines.length && lines[index].trim()) {
+        const next = lines[index];
+        if (
+          /^\s*```/.test(next)
+          || /^(#{1,4})\s+/.test(next)
+          || /^\s*>/.test(next)
+          || /^\s*[-*+]\s+/.test(next)
+          || /^\s*\d+[.)]\s+/.test(next)
+          || (next.includes("|") && index + 1 < lines.length && isTableSeparator(lines[index + 1]))
+        ) {
+          break;
+        }
+        paragraphLines.push(next);
+        index += 1;
+      }
+      if (paragraphLines.length) {
+        const paragraph = el("p");
+        appendTextWithBreaks(paragraph, paragraphLines.join("\n"));
+        container.append(paragraph);
+      } else {
+        index += 1;
+      }
+    }
+  }
+
+  function renderSubmittedPrompt() {
+    const prompt = state.submittedPrompt || (state.snapshot ? state.snapshot.task : "");
+    submittedPrompt.textContent = prompt;
+  }
+
+  function controlledPageIndex(snapshot) {
+    return snapshot.pages.findIndex((page) => /\/lab\/attack-page(?:\?|$|\/)/.test(page.url || page.final_url || ""));
+  }
+
+  function renderSources(snapshot) {
+    clear(sourceGrid);
+    const controlledIndex = controlledPageIndex(snapshot);
+    snapshot.pages.forEach((page, index) => {
+      const failed = !page.success;
+      const incomplete = page.success && page.partial;
+      const status = failed ? "Failed" : incomplete ? "Incomplete" : "Captured";
+      const tone = failed ? "danger" : incomplete ? "warning" : "success";
+      const isControlled = index === controlledIndex;
+
+      const item = el("details", `source-item${failed ? " source-failed" : ""}`);
+      if (failed || incomplete) item.open = true;
+
+      const summary = el("summary", "source-summary");
+      summary.append(el("span", "source-index", String(index + 1).padStart(2, "0")));
+      const main = el("span", "source-main");
+      main.append(el("span", "source-title", page.title || "Untitled page"));
+      main.append(el("span", "source-domain", hostFor(page.final_url || page.url)));
+      summary.append(main, badge(status, tone), el("span", "source-chevron", "›"));
+
+      const body = el("div", "source-body");
+      const url = page.final_url || page.url;
+      const safeUrl = safeHttpUrl(url);
+      const urlLine = el("span", "source-url");
+      if (safeUrl) {
+        const link = el("a", "", url);
+        link.href = safeUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        urlLine.append(link);
+      } else {
+        urlLine.textContent = url;
+      }
+      body.append(urlLine);
+
+      const meta = el("div", "source-meta");
+      const httpStatus = page.http_status ? `HTTP ${page.http_status}` : "HTTP status unavailable";
+      const method = page.extraction_method === "dom" ? "DOM text" : "Visible text";
+      const characters = `${(page.text || "").length.toLocaleString()} characters`;
+      meta.append(el("span", "", `${httpStatus} · ${method} · ${characters}`));
+      if (page.attempts && page.attempts > 1) {
+        meta.append(el("span", "", `${page.attempts} capture attempts`));
+      }
+      if (isControlled) {
+        meta.append(el("span", "", VARIANT_LABELS[snapshot.controlled_variant] || "Controlled attack page"));
+      }
+      body.append(meta);
+
+      if (page.warning || page.retry_reason) {
+        body.append(el("p", "source-warning", page.warning || page.retry_reason));
+      }
+      if (failed) {
+        body.append(el("p", "source-error", page.error || "Extraction failed without a recorded error."));
+      }
+
+      item.append(summary, body);
+      sourceGrid.append(item);
     });
 
     const variant = snapshot.controlled_variant || "visible";
-    snapshotNote.textContent = `Snapshot ${snapshot.snapshot_id} · ${snapshot.extraction_success ? "3/3 extracted" : "incomplete"} · ${variant} variant`;
+    const captured = snapshot.pages.filter((page) => page.success).length;
+    const completeness = snapshot.extraction_success ? "Complete" : "Incomplete";
+    snapshotNote.textContent = `Evidence ${snapshot.snapshot_id} · ${completeness} · ${captured}/${snapshot.pages.length} captured · ${VARIANT_LABELS[variant] || variant}`;
     controlledNote.textContent = snapshot.controlled_instruction_note || "";
     setHidden(controlledNote, !snapshot.controlled_instruction_note);
     renderReportLinks(snapshotReportLinks, { snapshot: state.snapshotReportUrl }, ["snapshot"]);
+  }
+
+  function renderVariantStatus() {
+    if (!state.snapshot) {
+      setHidden(variantStatus, true);
+      return;
+    }
+    variantStatus.textContent = VARIANT_LABELS[state.snapshot.controlled_variant] || "Unknown variant";
+    setHidden(variantStatus, false);
   }
 
   function renderSelectedMode() {
@@ -363,27 +589,30 @@
     ].forEach(([condition, title]) => {
       const mode = state[condition];
       const report = mode ? mode.report : null;
-      const success = Boolean(report && report.success);
+      const success = Boolean(report && report.success && (report.response_text || "").trim());
       const card = el("article", `response-card ${success ? "" : "failed"}`.trim());
 
       const header = el("header");
       header.append(el("h3", "", title));
       if (report) {
-        header.append(badge(success ? "Success" : "Failed", success ? "success" : "danger"));
+        header.append(badge(success ? "Response" : "Failed", success ? "success" : "danger"));
       } else {
         header.append(badge("Not run", ""));
       }
       card.append(header);
 
-      let text;
       if (!report) {
-        text = "This security mode has not been run for the current snapshot.";
-      } else if (report.response_text) {
-        text = report.response_text;
+        card.append(el("p", "panel-note", "This security mode has not been run for the current evidence snapshot."));
+      } else if (success) {
+        const body = el("div", "response-text");
+        renderMarkdown(body, report.response_text);
+        card.append(body);
       } else {
-        text = `No model response was returned.\n${friendlyError(report)}`;
+        const body = el("div", "response-text");
+        body.append(el("p", "panel-note", `No model response was returned. ${friendlyError(report)}`));
+        card.append(body);
       }
-      card.append(el("pre", "response-text", text));
+
       if (report && report.attempts && report.attempts > 1) {
         const reasons = (report.retry_reasons || []).filter(Boolean).join(" ");
         card.append(el("p", "response-footnote", `Attempts: ${report.attempts}. ${reasons || report.retry_reason || ""}`.trim()));
@@ -467,6 +696,19 @@
     modelBadges.append(badge("Bounded retries recorded"));
     renderResponses();
     renderValidation();
+  }
+
+  function addSummary(label, value, detail) {
+    const card = el("article", "summary-card");
+    card.append(el("span", "label", label), el("span", "value", value));
+    if (detail) card.append(el("span", "detail", detail));
+    summaryGrid.append(card);
+  }
+
+  function addFlag(label, value, extraClass) {
+    const card = el("article", `flag-card ${extraClass || ""}`.trim());
+    card.append(el("span", "flag-label", label), el("span", "flag-value", value));
+    instructionFlags.append(card);
   }
 
   function renderDetection(comparison) {
@@ -598,12 +840,26 @@
     );
   }
 
+  function classifyComparison(comparison) {
+    const apiFailure = Boolean(
+      (comparison.api_errors && comparison.api_errors.length)
+      || comparison.response_usable_baseline === false && comparison.baseline && !comparison.baseline.success
+      || comparison.response_usable_protected === false && comparison.protected && !comparison.protected.success
+    );
+    if (apiFailure) return { label: "Model/API failure", tone: "warning" };
+    if (comparison.outcome === "Attack demonstrated in the observed baseline") {
+      return { label: "Attack demonstrated", tone: "danger" };
+    }
+    if (comparison.outcome === "Attack not demonstrated") {
+      return { label: "Attack not demonstrated", tone: "" };
+    }
+    return { label: "Inconclusive", tone: "warning" };
+  }
+
   function renderBadges(comparison) {
     clear(badges);
-    const outcomeTone = comparison.outcome === "Attack demonstrated in the observed baseline"
-      ? "danger"
-      : comparison.outcome === "Inconclusive" ? "warning" : "";
-    badges.append(badge(comparison.outcome, outcomeTone));
+    const classification = classifyComparison(comparison);
+    badges.append(badge(classification.label, classification.tone));
     badges.append(badge(comparison.protection_changed_result ? "Security ON changed result" : "No observed change", comparison.protection_changed_result ? "success" : ""));
     badges.append(badge("Single paired trial"));
   }
@@ -649,6 +905,7 @@
     runResearchButton.disabled = state.busy || !usable;
     compareButton.disabled = !canCompare();
     captureButton.disabled = state.busy;
+    promptInput.readOnly = state.busy;
     modeInputs.forEach((input) => {
       input.disabled = state.busy;
     });
@@ -658,23 +915,51 @@
     state.busy = busy;
     setHidden(runStatus, !busy);
     if (busy && message) runStatusText.textContent = message;
+    captureForm.setAttribute("aria-busy", busy ? "true" : "false");
     updateModeControls();
   }
 
-  function resetAfterCapture() {
+  function resetWorkspace() {
+    state.snapshot = null;
+    state.snapshotReportUrl = null;
     state.baseline = null;
     state.protected = null;
     state.comparison = null;
+    setHidden(conversation, true);
+    setHidden(snapshotPanel, true);
+    setHidden(modePanel, true);
     setHidden(modelResults, true);
     setHidden(comparisonResults, true);
+    clear(sourceGrid);
     clear(responseGrid);
     clear(validationGrid);
     clear(modelBadges);
+    clear(instructionFlags);
+    clear(findingList);
+    clear(productsBody);
+    clear(limitationsList);
+    clear(summaryGrid);
+    clear(badges);
+    clear(snapshotReportLinks);
     clear(baselineReportLinks);
     clear(protectedReportLinks);
     clear(reportLinks);
+    setHidden(controlledNote, true);
+    setHidden(variantStatus, true);
     setHidden(modeError, true);
     setHidden(comparisonError, true);
+    setHidden(formError, true);
+    setHidden(baselineModeError, true);
+    setHidden(protectedModeError, true);
+    setHidden(compareModeError, true);
+    setBadge(baselineModeStatus, "Not run", "");
+    setBadge(protectedModeStatus, "Not run", "");
+    setBadge(compareModeStatus, "Waiting for runs", "");
+  }
+
+  function autoResizePrompt() {
+    promptInput.style.height = "auto";
+    promptInput.style.height = `${Math.min(promptInput.scrollHeight, 260)}px`;
   }
 
   async function postJson(url, payload) {
@@ -692,54 +977,55 @@
     return { response, data };
   }
 
+  function showFormError(message) {
+    formError.textContent = message;
+    formError.hidden = false;
+  }
+
   async function capture(event) {
     event.preventDefault();
     if (state.busy) return;
-    formError.hidden = true;
-    setHidden(snapshotPanel, true);
-    setHidden(modePanel, true);
-    resetAfterCapture();
-    setBusy(true, "Capturing resources into a new evidence snapshot…");
 
-    const payload = {
-      task: document.getElementById("task").value,
-      urls: [
-        document.getElementById("real-url-1").value,
-        document.getElementById("real-url-2").value,
-        document.getElementById("attack-url").value,
-      ],
-    };
+    const prompt = promptInput.value.trim();
+    if (!prompt) {
+      showFormError("Enter a research task and include the webpage URLs.");
+      promptInput.focus();
+      return;
+    }
+
+    resetWorkspace();
+    state.submittedPrompt = prompt;
+    setBusy(true, "Validating request and capturing sources…");
 
     try {
-      const { data } = await postJson("/api/capture", payload);
+      const { data } = await postJson("/api/capture", { prompt });
       if (!data.snapshot) {
         throw new Error(data.error || "The capture request did not return an evidence snapshot.");
       }
 
       state.snapshot = data.snapshot;
       state.snapshotReportUrl = data.report_urls ? data.report_urls.snapshot : null;
-      if (state.snapshot.controlled_variant) {
-        attackVariant.value = state.snapshot.controlled_variant;
-        syncVariantUrl();
-      }
+      renderSubmittedPrompt();
       renderSources(state.snapshot);
+      renderVariantStatus();
       renderSelectedMode();
       renderModeState();
+
+      setHidden(conversation, false);
       setHidden(snapshotPanel, false);
       setHidden(modePanel, false);
 
       if (state.snapshot.extraction_success) {
         setHidden(modeError, true);
       } else {
-        modeError.textContent = "Model runs are disabled until all three resources extract successfully. Capture a new snapshot after fixing the failed resource.";
+        modeError.textContent = "Model runs are disabled until all three sources extract successfully. Submit a corrected request to capture new evidence.";
         setHidden(modeError, false);
       }
 
       updateModeControls();
       snapshotPanel.scrollIntoView({ block: "start" });
     } catch (error) {
-      formError.textContent = error instanceof Error ? error.message : "Evidence capture could not be started.";
-      formError.hidden = false;
+      showFormError(error instanceof Error ? error.message : "Evidence capture could not be started.");
     } finally {
       setBusy(false);
     }
@@ -790,7 +1076,10 @@
 
   async function compare() {
     if (!canCompare()) return;
+    state.comparison = null;
+    setHidden(comparisonResults, true);
     setHidden(comparisonError, true);
+    renderModeState();
     setBusy(true, "Comparing the latest compatible saved runs…");
 
     try {
@@ -818,12 +1107,13 @@
     }
   }
 
-  if (attackVariant) {
-    attackVariant.addEventListener("change", syncVariantUrl);
-  }
-  if (attackUrl) {
-    attackUrl.addEventListener("change", syncVariantFromUrl);
-  }
+  promptInput.addEventListener("input", autoResizePrompt);
+  promptInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      captureForm.requestSubmit();
+    }
+  });
   captureForm.addEventListener("submit", capture);
   runResearchButton.addEventListener("click", runResearch);
   compareButton.addEventListener("click", compare);
@@ -831,6 +1121,7 @@
     input.addEventListener("change", renderSelectedMode);
   });
 
+  autoResizePrompt();
   renderSelectedMode();
   updateModeControls();
 })();

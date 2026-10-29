@@ -4,7 +4,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from app.schemas import (
     BaselineReport,
@@ -15,7 +14,7 @@ from app.schemas import (
     ExperimentReport,
     GenerationSettings,
 )
-from app.security.url_policy import URLPolicyError, validate_url
+from app.security.url_policy import URLPolicyError, canonical_url, validate_url
 from app.services.evaluation import compare_conditions, evidence_sha256
 from app.services.extraction import extract_page
 from app.services.fixture import variant_from_url
@@ -87,15 +86,6 @@ class ComparisonOutcome:
     protected_report: BaselineReport
     baseline_path: Path
     protected_path: Path
-
-
-def canonical_url(url: str) -> str:
-    try:
-        parsed = urlsplit(url.strip())
-    except ValueError:
-        return url.strip().lower()
-    path = parsed.path.rstrip("/") or "/"
-    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}{path}"
 
 
 def _validate_experiment_urls(urls: Sequence[str], controlled_url: str) -> None:

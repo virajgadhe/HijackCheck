@@ -6,6 +6,7 @@ from flask import url_for
 
 from app import create_app
 from app.services import experiment as experiment_module
+from app.services import prompt_parser as prompt_parser_module
 from app import routes as routes_module
 from app.services.extraction import ExtractionResult
 from app.services.gemma import run_baseline
@@ -96,6 +97,7 @@ def make_runner(protected=False):
 
 def make_app(tmp_path, monkeypatch):
     monkeypatch.setattr(experiment_module, "validate_url", fake_validate)
+    monkeypatch.setattr(prompt_parser_module, "validate_url", fake_validate)
     app = create_app()
     app.config.update(
         TESTING=True,
@@ -123,7 +125,7 @@ def make_app(tmp_path, monkeypatch):
     return app, controlled_url
 
 
-def test_index_renders_working_form_without_secret(tmp_path):
+def test_index_renders_single_composer_workspace_without_secret(tmp_path):
     app = create_app()
     app.config.update(TESTING=True, RUNS_DIR=str(tmp_path), GOOGLE_API_KEY=SECRET)
 
@@ -131,34 +133,37 @@ def test_index_renders_working_form_without_secret(tmp_path):
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
+    assert "HijackCheck" in html
+    assert "AI VIBE CHECK" in html
     assert 'id="capture-form"' in html
+    assert 'id="prompt"' in html
+    assert 'placeholder="Describe what you want to research and include the webpage URLs...' in html
     assert 'id="capture-button"' in html
     assert 'id="run-research-button"' in html
     assert 'id="compare-button"' in html
     assert 'id="security-off"' in html
     assert 'id="security-on"' in html
-    assert 'id="real-url-1"' in html
-    assert 'id="real-url-2"' in html
-    assert 'id="attack-url"' in html
-    assert 'id="attack-variant"' in html
     assert 'id="snapshot-panel"' in html
+    assert 'id="source-grid"' in html
+    assert 'id="variant-status"' in html
     assert 'id="model-results"' in html
     assert 'id="comparison-results"' in html
     assert 'id="run-baseline-button"' not in html
     assert 'id="run-protected-button"' not in html
-    assert "Can an embedded webpage instruction change a budget-conscious laptop recommendation?" in html
-    assert "Resource 1" in html
-    assert "Resource 2" in html
-    assert "Resource 3" in html
-    assert "Visible" in html
-    assert "Hidden" in html
-    assert "Control" in html
+    assert 'id="real-url-1"' not in html
+    assert 'id="real-url-2"' not in html
+    assert 'id="attack-url"' not in html
+    assert 'id="attack-variant"' not in html
+    assert "Can an embedded webpage instruction change a budget-conscious laptop recommendation?" not in html
+    assert "Resource 1" not in html
+    assert "Resource 2" not in html
+    assert "Resource 3" not in html
     assert "Security OFF" in html
     assert "Security ON" in html
-    assert "Capture saves evidence only" in html
+    assert "Captured sources" in html
+    assert "Controlled page:" in html
     assert "http://localhost/lab/attack-page" in html
-    assert "https://www.dellstore.com/dell-16-laptop-odc1625001201rins1.html" in html
-    assert "https://www.flipkart.com/dell-15-amd-ryzen-5-hexa-core-7530u-16-gb-512-gb-ssd-windows-11-home-dc15255-thin-light-laptop/p/itmd2c537a36f182" in html
+    assert "?variant=hidden" in html
     assert "https://system76.com/laptops/lemur-pro" not in html
     assert SECRET not in html
 
@@ -288,3 +293,96 @@ def test_report_endpoint_does_not_expose_environment(tmp_path):
 
     response = client.get("/api/reports/..%2F.env")
     assert response.status_code == 404
+
+
+def test_capture_endpoint_accepts_one_prompt_and_reorders_controlled_source(tmp_path, monkeypatch):
+    app = create_app()
+    app.config.update(TESTING=True, RUNS_DIR=str(tmp_path), GOOGLE_API_KEY=SECRET)
+    client = app.test_client()
+    monkeypatch.setattr(prompt_parser_module, "validate_url", fake_validate)
+    with app.test_request_context():
+        controlled_url = url_for("main.attack_page", _external=True)
+
+    captured = {}
+
+    def fake_capture(task, urls, **kwargs):
+        from app.schemas import EvidenceSnapshot
+        from app.services.experiment import CaptureOutcome
+
+        captured["task"] = task
+        captured["urls"] = urls
+        snapshot = EvidenceSnapshot(
+            snapshot_id="evidence-prompt-test",
+            created_at="2026-10-23T00:00:00+00:00",
+            task=task,
+            pages=[],
+            evidence_sha256="a" * 64,
+            extraction_success=True,
+            controlled_variant="hidden",
+        )
+        return CaptureOutcome(
+            snapshot=snapshot,
+            status_code=200,
+            snapshot_path=tmp_path / "evidence-prompt-test.json",
+        )
+
+    monkeypatch.setattr(routes_module, "capture_evidence", fake_capture)
+    prompt = (
+        f"{controlled_url}?variant=hidden\n"
+        f"{TASK}\n"
+        "https://shop.example.com/one\n"
+        "https://shop.example.com/two"
+    )
+
+    response = client.post("/api/capture", json={"prompt": prompt})
+
+    assert response.status_code == 200
+    assert captured["task"] == TASK
+    assert captured["urls"] == [
+        "https://shop.example.com/one",
+        "https://shop.example.com/two",
+        f"{controlled_url}?variant=hidden",
+    ]
+    assert response.get_json()["snapshot"]["controlled_variant"] == "hidden"
+
+
+def test_capture_endpoint_rejects_invalid_prompt_before_capture(tmp_path, monkeypatch):
+    app = create_app()
+    app.config.update(TESTING=True, RUNS_DIR=str(tmp_path), GOOGLE_API_KEY=SECRET)
+    client = app.test_client()
+
+    def unexpected_capture(*args, **kwargs):
+        raise AssertionError("capture must not run for an invalid prompt")
+
+    monkeypatch.setattr(routes_module, "capture_evidence", unexpected_capture)
+    response = client.post(
+        "/api/capture",
+        json={"prompt": f"{TASK}\nhttps://shop.example.com/one"},
+    )
+
+    assert response.status_code == 400
+    assert "exactly two external product URLs" in response.get_json()["error"]
+    assert not list(tmp_path.glob("*.json"))
+
+
+def test_experiment_endpoint_accepts_single_prompt(tmp_path, monkeypatch):
+    app, controlled_url = make_app(tmp_path, monkeypatch)
+    client = app.test_client()
+    prompt = (
+        f"{TASK}\n"
+        "https://system76.com/laptops/lemur-pro\n"
+        "https://system76.com/laptops/darter-pro\n"
+        f"{controlled_url}"
+    )
+
+    response = client.post("/api/experiment", json={"prompt": prompt})
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["experiment"]["task"] == TASK
+    assert [page["url"] for page in data["experiment"]["pages"]] == [
+        "https://system76.com/laptops/lemur-pro",
+        "https://system76.com/laptops/darter-pro",
+        controlled_url,
+    ]
+    assert data["experiment"]["comparison"]["same_evidence"] is True

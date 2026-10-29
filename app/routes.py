@@ -30,13 +30,12 @@ from app.services.fixture import (
     ATTACK_MARKER,
     ATTACK_NOTE,
     DEFAULT_PAGE_VARIANT,
-    DEFAULT_RESOURCE_URLS,
     DEFAULT_TASK,
-    PAGE_VARIANTS,
     normalize_variant,
     variant_from_url,
 )
 from app.services.gemma import run_baseline
+from app.services.prompt_parser import ResearchPromptError, parse_research_prompt
 from app.services.reporting import save_report
 
 main = Blueprint("main", __name__)
@@ -54,12 +53,7 @@ def _controlled_url(variant: str = DEFAULT_PAGE_VARIANT) -> str:
 def index():
     return render_template(
         "index.html",
-        default_task=DEFAULT_TASK,
-        resource_url_1=DEFAULT_RESOURCE_URLS[0],
-        resource_url_2=DEFAULT_RESOURCE_URLS[1],
         attack_url=_controlled_url(),
-        attack_variant=DEFAULT_PAGE_VARIANT,
-        attack_variants=PAGE_VARIANTS,
         api_key_configured=bool(current_app.config["GOOGLE_API_KEY"]),
     )
 
@@ -88,6 +82,21 @@ def _report_url(filename: str) -> str:
     return url_for("main.report_file", filename=filename)
 
 
+def _task_and_urls(payload: dict, controlled_url: str) -> tuple[str, list[str]]:
+    if "prompt" in payload:
+        prompt = payload.get("prompt")
+        if not isinstance(prompt, str):
+            raise ExperimentValidationError("'prompt' must be a string.")
+        parsed = parse_research_prompt(prompt, controlled_url=controlled_url)
+        return parsed.task, list(parsed.urls)
+
+    task = payload.get("task")
+    urls = payload.get("urls")
+    if not isinstance(urls, list):
+        raise ExperimentValidationError("'urls' must contain exactly three URLs.")
+    return task, urls
+
+
 def _snapshot_id(payload: dict) -> str:
     snapshot_id = payload.get("snapshot_id")
     if not isinstance(snapshot_id, str) or not snapshot_id.strip():
@@ -101,12 +110,8 @@ def capture():
     if not isinstance(payload, dict):
         return jsonify(error="Request body must be a JSON object."), 400
 
-    task = payload.get("task")
-    urls = payload.get("urls")
-    if not isinstance(urls, list):
-        return jsonify(error="'urls' must contain exactly three URLs."), 400
-
     try:
+        task, urls = _task_and_urls(payload, _controlled_url())
         outcome = capture_evidence(
             task,
             urls,
@@ -114,7 +119,7 @@ def capture():
             runs_dir=current_app.config["RUNS_DIR"],
             extraction_timeout_ms=int(current_app.config["EXTRACTION_TIMEOUT_MS"]),
         )
-    except ExperimentValidationError as exc:
+    except (ExperimentValidationError, ResearchPromptError) as exc:
         return jsonify(error=str(exc)), 400
 
     return (
@@ -218,12 +223,8 @@ def experiment():
     if not isinstance(payload, dict):
         return jsonify(error="Request body must be a JSON object."), 400
 
-    task = payload.get("task")
-    urls = payload.get("urls")
-    if not isinstance(urls, list):
-        return jsonify(error="'urls' must contain exactly three URLs."), 400
-
     try:
+        task, urls = _task_and_urls(payload, _controlled_url())
         outcome = run_experiment(
             task,
             urls,
@@ -234,7 +235,7 @@ def experiment():
             runs_dir=current_app.config["RUNS_DIR"],
             extraction_timeout_ms=int(current_app.config["EXTRACTION_TIMEOUT_MS"]),
         )
-    except ExperimentValidationError as exc:
+    except (ExperimentValidationError, ResearchPromptError) as exc:
         return jsonify(error=str(exc)), 400
 
     report_urls = {

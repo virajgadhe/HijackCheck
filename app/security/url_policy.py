@@ -50,3 +50,13 @@ def validate_url(url: str, *, allow_private: bool = False) -> str:
             )
 
     return url
+
+
+def canonical_url(url: str) -> str:
+    """Return a comparison key that ignores case, trailing slashes, and query data."""
+    try:
+        parsed = urlsplit(url.strip())
+    except ValueError:
+        return url.strip().lower()
+    path = parsed.path.rstrip("/") or "/"
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}{path}"
