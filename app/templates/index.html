@@ -17,299 +17,394 @@
     <header class="topbar">
       <div class="shell topbar-inner">
         <a class="brand" href="{{ url_for('main.index') }}">HijackCheck</a>
-        <span class="vibe-label">AI VIBE CHECK</span>
       </div>
     </header>
 
-    <main class="shell app-main">
-      <section class="composer-wrap" aria-label="Research request">
-        <form id="capture-form" class="composer" novalidate>
-          <label class="sr-only" for="prompt"
-            >Research task and source URLs</label
-          >
-          <textarea
-            id="prompt"
-            name="prompt"
-            rows="1"
-            spellcheck="true"
-            aria-describedby="composer-help"
-            placeholder="Describe what you want to research and include the webpage URLs..."
-          ></textarea>
-          <div class="composer-bar">
-            <p class="composer-help" id="composer-help">
-              Include two external product URLs and one HijackCheck attack-page
-              URL. Controlled page:
-              <code>{{ attack_url }}?variant=hidden</code>.
-            </p>
-            <div class="composer-actions">
-              <span class="composer-shortcut"
-                >Enter to run · Shift+Enter for a new line</span
-              >
-              <button class="primary-button" id="capture-button" type="submit">
-                <span>Run research</span>
-                <span class="button-enter" aria-hidden="true">↵</span>
-              </button>
+    <main class="shell app-main" id="app-main">
+      <section class="landing" id="landing" aria-labelledby="landing-title">
+        <div class="landing-inner">
+          <h1 id="landing-title">What would you like to investigate?</h1>
+          <p class="landing-subtitle">
+            Add two product pages and one controlled attack page. HijackCheck
+            captures the evidence, then compares Security OFF with Security ON.
+          </p>
+
+          <div class="composer-home" id="composer-home">
+            <div class="composer-wrap" id="composer-wrap">
+              <form id="capture-form" class="composer" novalidate>
+                <label class="sr-only" for="prompt"
+                  >Research task and source URLs</label
+                >
+                <textarea
+                  id="prompt"
+                  name="prompt"
+                  rows="1"
+                  spellcheck="true"
+                  aria-describedby="composer-help"
+                  placeholder="Describe what you want to investigate and include the webpage URLs..."
+                ></textarea>
+                <div class="composer-bar">
+                  <p class="composer-help" id="composer-help">
+                    Include two external product URLs and one controlled page,
+                    for example
+                    <code>{{ attack_url }}?variant=hidden</code>.
+                    Variants: <code>visible</code>, <code>hidden</code>,
+                    <code>control</code>.
+                  </p>
+                  <div class="composer-actions">
+                    <span class="composer-shortcut"
+                      >Enter to run · Shift+Enter for a new line</span
+                    >
+                    <button
+                      class="primary-button"
+                      id="capture-button"
+                      type="submit"
+                    >
+                      <span>Run research</span>
+                      <span class="button-enter" aria-hidden="true">↵</span>
+                    </button>
+                  </div>
+                </div>
+
+                {% if not api_key_configured %}
+                <p class="alert alert-warning" role="alert">
+                  No Gemma API key is configured. Evidence capture still works,
+                  but model runs will be recorded as incomplete.
+                </p>
+                {% endif %}
+
+                <p
+                  class="alert alert-error"
+                  id="form-error"
+                  role="alert"
+                  hidden
+                ></p>
+              </form>
+
+              <p class="status-line" id="run-status" aria-live="polite" hidden>
+                <span class="status-indicator" aria-hidden="true"></span>
+                <span id="run-status-text">Working…</span>
+              </p>
             </div>
           </div>
-
-          {% if not api_key_configured %}
-          <p class="alert alert-warning" role="alert">
-            No Gemma API key is configured. Evidence capture still works, but
-            model runs will be recorded as incomplete.
-          </p>
-          {% endif %}
-
-          <p class="alert alert-error" id="form-error" role="alert" hidden></p>
-        </form>
-
-        <p class="status-line" id="run-status" aria-live="polite" hidden>
-          <span class="status-indicator" aria-hidden="true"></span>
-          <span id="run-status-text">Working…</span>
-        </p>
+        </div>
       </section>
 
-      <section id="conversation" class="conversation" hidden>
-        <article class="user-turn">
-          <p class="turn-label">Your request</p>
-          <p id="submitted-prompt" class="submitted-prompt"></p>
-        </article>
-
-        <section
-          id="snapshot-panel"
-          class="workspace-section"
-          hidden
-          aria-labelledby="sources-heading"
+      <section class="workspace" id="workspace" hidden>
+        <aside
+          class="analysis-panel"
+          id="analysis-panel"
+          aria-label="Security analysis"
         >
-          <div class="section-head">
+          <div class="panel-heading">
             <div>
-              <h2 id="sources-heading">Captured sources</h2>
-              <p class="section-note" id="snapshot-note"></p>
+              <p class="panel-eyebrow">Security analysis</p>
+              <h2>Evidence and findings</h2>
             </div>
-            <div class="report-links" id="snapshot-report-links"></div>
+            <span class="badge" id="analysis-status-badge">Waiting</span>
           </div>
-          <div class="source-list" id="source-grid"></div>
-          <p class="note" id="controlled-note" hidden></p>
-        </section>
 
-        <section
-          id="mode-panel"
-          class="workspace-section"
-          hidden
-          aria-labelledby="experiment-heading"
-        >
-          <div class="section-head">
-            <div>
-              <h2 id="experiment-heading">Experiment</h2>
-              <p class="section-note">
-                Run both security conditions against the same saved evidence.
-              </p>
-            </div>
-            <span
-              class="status-pill variant-pill"
-              id="variant-status"
+          <div class="analysis-scroll" id="analysis-scroll">
+            <section
+              id="snapshot-panel"
+              class="analysis-section"
               hidden
-            ></span>
-          </div>
-
-          <div class="experiment-controls">
-            <fieldset class="security-switch">
-              <legend class="sr-only">Security mode</legend>
-              <div class="security-options">
-                <input
-                  class="sr-only"
-                  type="radio"
-                  name="security_mode"
-                  id="security-off"
-                  value="baseline"
-                  checked
-                />
-                <label for="security-off">Security OFF</label>
-                <input
-                  class="sr-only"
-                  type="radio"
-                  name="security_mode"
-                  id="security-on"
-                  value="protected"
-                />
-                <label for="security-on">Security ON</label>
-              </div>
-            </fieldset>
-            <span class="mode-current" id="selected-mode-label"
-              >Security OFF selected</span
+              aria-labelledby="sources-heading"
             >
-            <div class="experiment-actions">
-              <button
-                class="secondary-button"
-                id="run-research-button"
-                type="button"
-              >
-                Run selected mode
-              </button>
-              <button
-                class="secondary-button"
-                id="compare-button"
-                type="button"
-                disabled
-              >
-                Compare runs
-              </button>
-            </div>
-          </div>
-          <p class="run-description" id="selected-mode-description">
-            The unprotected baseline sends captured evidence directly to Gemma.
-          </p>
+              <div class="section-head">
+                <div>
+                  <h2 id="sources-heading">Sources and evidence</h2>
+                  <p class="section-note" id="snapshot-note"></p>
+                </div>
+                <div
+                  class="report-links"
+                  id="snapshot-report-links"
+                ></div>
+              </div>
+              <div class="source-list" id="source-grid"></div>
+              <p class="note" id="controlled-note" hidden></p>
+            </section>
 
-          <div class="mode-status-row">
-            <div class="mode-status-panel">
-              <div class="mode-status-top">
-                <span class="mode-name">Security OFF</span>
-                <span class="badge" id="baseline-mode-status">Not run</span>
+            <section
+              id="condition-panel"
+              class="analysis-section"
+              hidden
+              aria-labelledby="condition-heading"
+            >
+              <div class="section-head">
+                <div>
+                  <h2 id="condition-heading">Security conditions</h2>
+                  <p class="section-note">
+                    Each mode reads the same saved evidence snapshot.
+                  </p>
+                </div>
+                <span
+                  class="status-pill variant-pill"
+                  id="variant-status"
+                  hidden
+                ></span>
               </div>
-              <p class="mode-error" id="baseline-mode-error" hidden></p>
-              <div class="report-links" id="baseline-report-links"></div>
-            </div>
-            <div class="mode-status-panel">
-              <div class="mode-status-top">
-                <span class="mode-name">Security ON</span>
-                <span class="badge" id="protected-mode-status">Not run</span>
+
+              <div class="mode-status-row">
+                <div class="mode-status-panel">
+                  <div class="mode-status-top">
+                    <span class="mode-name">Security OFF</span>
+                    <span class="badge" id="baseline-mode-status">Not run</span>
+                  </div>
+                  <p class="mode-error" id="baseline-mode-error" hidden></p>
+                  <div class="report-links" id="baseline-report-links"></div>
+                </div>
+                <div class="mode-status-panel">
+                  <div class="mode-status-top">
+                    <span class="mode-name">Security ON</span>
+                    <span class="badge" id="protected-mode-status"
+                      >Not run</span
+                    >
+                  </div>
+                  <p class="mode-error" id="protected-mode-error" hidden></p>
+                  <div class="report-links" id="protected-report-links"></div>
+                </div>
+                <div class="mode-status-panel">
+                  <div class="mode-status-top">
+                    <span class="mode-name">Comparison</span>
+                    <span class="badge" id="compare-mode-status"
+                      >Waiting for runs</span
+                    >
+                  </div>
+                  <p class="mode-error" id="compare-mode-error" hidden></p>
+                </div>
               </div>
-              <p class="mode-error" id="protected-mode-error" hidden></p>
-              <div class="report-links" id="protected-report-links"></div>
-            </div>
-            <div class="mode-status-panel">
-              <div class="mode-status-top">
-                <span class="mode-name">Comparison</span>
-                <span class="badge" id="compare-mode-status"
-                  >Waiting for runs</span
+
+              <p class="alert alert-error" id="mode-error" role="alert" hidden></p>
+            </section>
+
+            <section
+              id="analysis-outcome"
+              class="analysis-section"
+              hidden
+              aria-labelledby="outcome-heading"
+            >
+              <div class="section-head">
+                <div>
+                  <h2 id="outcome-heading">Final observed finding</h2>
+                  <p class="section-note">
+                    Observation from this single paired trial only.
+                  </p>
+                </div>
+                <div class="badge-row" id="analysis-badges"></div>
+              </div>
+              <div class="analysis-finding" id="analysis-finding"></div>
+            </section>
+
+            <section
+              id="analysis-details"
+              class="analysis-section"
+              hidden
+              aria-label="Detailed analysis"
+            >
+              <details class="compact-panel" open>
+                <summary>
+                  <span>Instruction flow</span>
+                  <span class="compact-meta"
+                    >Heuristic detection, not attack proof</span
+                  >
+                </summary>
+                <div class="compact-content">
+                  <div class="flag-grid" id="instruction-flags"></div>
+                  <div class="finding-list" id="finding-list"></div>
+                </div>
+              </details>
+
+              <details class="compact-panel">
+                <summary>
+                  <span>Recommendation and budget validation</span>
+                  <span class="compact-meta"
+                    >Deterministic checks when applicable</span
+                  >
+                </summary>
+                <div class="compact-content">
+                  <div class="validation-grid" id="validation-grid"></div>
+                </div>
+              </details>
+
+              <details class="compact-panel">
+                <summary>
+                  <span>Captured facts</span>
+                  <span class="compact-meta"
+                    >Structured values from saved evidence</span
+                  >
+                </summary>
+                <div class="compact-content">
+                  <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th scope="col">Item</th>
+                          <th scope="col">Captured value</th>
+                          <th scope="col">Currency</th>
+                          <th scope="col">Normalized INR</th>
+                          <th scope="col">Constraint status</th>
+                          <th scope="col">Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody id="products-body"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </details>
+
+              <details class="compact-panel">
+                <summary><span>Limitations</span></summary>
+                <div class="compact-content">
+                  <ul class="limitations" id="limitations-list"></ul>
+                </div>
+              </details>
+
+              <details class="compact-panel">
+                <summary><span>Saved reports</span></summary>
+                <div class="compact-content">
+                  <div class="report-links" id="report-links"></div>
+                </div>
+              </details>
+            </section>
+          </div>
+        </aside>
+
+        <section
+          class="conversation-panel"
+          id="conversation-panel"
+          aria-label="Research conversation"
+        >
+          <div class="conversation-scroll" id="conversation">
+            <article class="user-turn">
+              <p class="turn-label">Your request</p>
+              <p id="submitted-prompt" class="submitted-prompt"></p>
+            </article>
+
+            <section
+              id="run-panel"
+              class="workspace-section run-panel"
+              aria-labelledby="experiment-heading"
+            >
+              <div class="section-head">
+                <div>
+                  <h2 id="experiment-heading">Run experiment</h2>
+                  <p class="section-note">
+                    Run both security conditions, then compare compatible
+                    saved results.
+                  </p>
+                </div>
+              </div>
+
+              <div class="experiment-controls">
+                <fieldset class="security-switch">
+                  <legend class="sr-only">Security mode</legend>
+                  <div class="security-options">
+                    <input
+                      class="sr-only"
+                      type="radio"
+                      name="security_mode"
+                      id="security-off"
+                      value="baseline"
+                      checked
+                    />
+                    <label for="security-off">Security OFF</label>
+                    <input
+                      class="sr-only"
+                      type="radio"
+                      name="security_mode"
+                      id="security-on"
+                      value="protected"
+                    />
+                    <label for="security-on">Security ON</label>
+                  </div>
+                </fieldset>
+                <span class="mode-current" id="selected-mode-label"
+                  >Security OFF selected</span
                 >
+                <div class="experiment-actions">
+                  <button
+                    class="secondary-button"
+                    id="run-research-button"
+                    type="button"
+                  >
+                    Run selected mode
+                  </button>
+                  <button
+                    class="secondary-button"
+                    id="compare-button"
+                    type="button"
+                    disabled
+                  >
+                    Compare runs
+                  </button>
+                </div>
               </div>
-              <p class="mode-error" id="compare-mode-error" hidden></p>
-            </div>
-          </div>
-
-          <p class="alert alert-error" id="mode-error" role="alert" hidden></p>
-        </section>
-
-        <section
-          id="model-results"
-          class="workspace-section"
-          hidden
-          aria-labelledby="responses-heading"
-        >
-          <div class="section-head">
-            <div>
-              <h2 id="responses-heading">Model responses</h2>
-              <p class="section-note">
-                Each panel shows only its own run. A missing or failed mode
-                never borrows the other response.
+              <p class="run-description" id="selected-mode-description">
+                The unprotected baseline sends captured evidence directly to
+                Gemma.
               </p>
-            </div>
-            <div class="badge-row" id="model-badges"></div>
-          </div>
+            </section>
 
-          <div
-            class="response-grid"
-            id="response-grid"
-            aria-live="polite"
-          ></div>
-
-          <details class="compact-panel">
-            <summary>
-              <span>Constraint validation</span>
-              <span class="compact-meta"
-                >Deterministic checks, when applicable</span
-              >
-            </summary>
-            <div class="compact-content">
-              <div class="validation-grid" id="validation-grid"></div>
-            </div>
-          </details>
-        </section>
-
-        <section
-          id="comparison-results"
-          class="workspace-section"
-          hidden
-          aria-labelledby="comparison-heading"
-        >
-          <div class="section-head">
-            <div>
-              <h2 id="comparison-heading">Observed comparison</h2>
-              <p class="section-note">
-                Single paired trials describe observations, not proof of
-                causation.
-              </p>
-            </div>
-            <div class="badge-row" id="result-badges"></div>
-          </div>
-
-          <p
-            class="alert alert-error"
-            id="comparison-error"
-            role="alert"
-            hidden
-          ></p>
-          <div class="summary-grid" id="summary-grid"></div>
-
-          <details class="compact-panel" open>
-            <summary>
-              <span>Instruction flow</span>
-              <span class="compact-meta"
-                >Heuristic detection, not proof of attack success</span
-              >
-            </summary>
-            <div class="compact-content">
-              <div class="flag-grid" id="instruction-flags"></div>
-              <div class="finding-list" id="finding-list"></div>
-            </div>
-          </details>
-
-          <details class="compact-panel">
-            <summary>
-              <span>Captured facts</span>
-              <span class="compact-meta"
-                >Structured values from the saved evidence</span
-              >
-            </summary>
-            <div class="compact-content">
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th scope="col">Item</th>
-                      <th scope="col">Captured value</th>
-                      <th scope="col">Currency</th>
-                      <th scope="col">Normalized INR</th>
-                      <th scope="col">Constraint status</th>
-                      <th scope="col">Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody id="products-body"></tbody>
-                </table>
+            <section
+              id="model-results"
+              class="workspace-section"
+              hidden
+              aria-labelledby="responses-heading"
+            >
+              <div class="section-head">
+                <div>
+                  <h2 id="responses-heading">Model responses</h2>
+                  <p class="section-note">
+                    Each panel shows only its own run. A failed mode never
+                    borrows the other response.
+                  </p>
+                </div>
+                <div class="badge-row" id="model-badges"></div>
               </div>
-            </div>
-          </details>
 
-          <details class="compact-panel">
-            <summary><span>Limitations</span></summary>
-            <div class="compact-content">
-              <ul class="limitations" id="limitations-list"></ul>
-            </div>
-          </details>
+              <div
+                class="response-grid"
+                id="response-grid"
+                aria-live="polite"
+              ></div>
+            </section>
 
-          <details class="compact-panel">
-            <summary><span>Saved reports</span></summary>
-            <div class="compact-content">
-              <div class="report-links" id="report-links"></div>
-            </div>
-          </details>
+            <section
+              id="comparison-results"
+              class="workspace-section"
+              hidden
+              aria-labelledby="comparison-heading"
+            >
+              <div class="section-head">
+                <div>
+                  <h2 id="comparison-heading">Observed comparison</h2>
+                  <p class="section-note">
+                    Single paired trials describe observations, not proof of
+                    causation.
+                  </p>
+                </div>
+                <div class="badge-row" id="result-badges"></div>
+              </div>
+
+              <p
+                class="alert alert-error"
+                id="comparison-error"
+                role="alert"
+                hidden
+              ></p>
+              <div class="summary-grid" id="summary-grid"></div>
+            </section>
+          </div>
+
+          <div class="composer-slot" id="composer-slot"></div>
         </section>
       </section>
     </main>
 
     <footer class="site-footer">
       <div class="shell footer-inner">
-        <p>HijackCheck · AI VIBE CHECK</p>
+        <p>HijackCheck</p>
         <p>Controlled indirect prompt-injection research</p>
       </div>
     </footer>

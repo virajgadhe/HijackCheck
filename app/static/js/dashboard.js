@@ -14,6 +14,14 @@
   const selectedModeLabel = document.getElementById("selected-mode-label");
   const selectedModeDescription = document.getElementById("selected-mode-description");
 
+  const appMain = document.getElementById("app-main");
+  const landing = document.getElementById("landing");
+  const workspace = document.getElementById("workspace");
+  const composerWrap = document.getElementById("composer-wrap");
+  const composerSlot = document.getElementById("composer-slot");
+  const analysisStatusBadge = document.getElementById("analysis-status-badge");
+  const analysisScroll = document.getElementById("analysis-scroll");
+
   const conversation = document.getElementById("conversation");
   const submittedPrompt = document.getElementById("submitted-prompt");
   const snapshotPanel = document.getElementById("snapshot-panel");
@@ -23,7 +31,7 @@
   const snapshotReportLinks = document.getElementById("snapshot-report-links");
   const variantStatus = document.getElementById("variant-status");
 
-  const modePanel = document.getElementById("mode-panel");
+  const conditionPanel = document.getElementById("condition-panel");
   const baselineModeStatus = document.getElementById("baseline-mode-status");
   const protectedModeStatus = document.getElementById("protected-mode-status");
   const compareModeStatus = document.getElementById("compare-mode-status");
@@ -37,6 +45,10 @@
   const modelBadges = document.getElementById("model-badges");
   const responseGrid = document.getElementById("response-grid");
   const validationGrid = document.getElementById("validation-grid");
+  const analysisDetails = document.getElementById("analysis-details");
+  const analysisOutcome = document.getElementById("analysis-outcome");
+  const analysisBadges = document.getElementById("analysis-badges");
+  const analysisFinding = document.getElementById("analysis-finding");
 
   const comparisonResults = document.getElementById("comparison-results");
   const comparisonError = document.getElementById("comparison-error");
@@ -686,9 +698,27 @@
     );
   }
 
+  function renderAnalysisStatus() {
+    if (!state.snapshot) {
+      setBadge(analysisStatusBadge, "Waiting", "");
+      return;
+    }
+    if (state.comparison) {
+      const classification = classifyComparison(state.comparison.comparison);
+      setBadge(analysisStatusBadge, classification.label, classification.tone);
+      return;
+    }
+    if (state.baseline || state.protected) {
+      setBadge(analysisStatusBadge, "Responses ready", "warning");
+      return;
+    }
+    setBadge(analysisStatusBadge, "Evidence captured", "success");
+  }
+
   function renderModelResults() {
     const hasRun = Boolean(state.baseline || state.protected);
     setHidden(modelResults, !hasRun);
+    setHidden(analysisDetails, !hasRun);
     if (!hasRun) return;
 
     clear(modelBadges);
@@ -696,6 +726,13 @@
     modelBadges.append(badge("Bounded retries recorded"));
     renderResponses();
     renderValidation();
+    if (!state.comparison) {
+      clear(instructionFlags);
+      clear(findingList);
+      findingList.append(
+        el("p", "panel-note", "Instruction flow is populated after the paired comparison.")
+      );
+    }
   }
 
   function addSummary(label, value, detail) {
@@ -880,6 +917,57 @@
     [...new Set(items)].forEach((item) => limitationsList.append(el("li", "", item)));
   }
 
+  function outcomeLead(classification) {
+    if (classification.label === "Attack demonstrated") {
+      return "The Security OFF response demonstrated the observed unsafe recommendation.";
+    }
+    if (classification.label === "Attack not demonstrated") {
+      return "No unsafe over-budget recommendation was observed in this paired trial.";
+    }
+    if (classification.label === "Model/API failure") {
+      return "At least one condition returned no usable response, so no attack conclusion is drawn.";
+    }
+    return "The paired evidence is inconclusive for this trial.";
+  }
+
+  function renderAnalysisOutcome(comparison) {
+    clear(analysisBadges);
+    clear(analysisFinding);
+    const classification = classifyComparison(comparison);
+    analysisBadges.append(badge(classification.label, classification.tone));
+
+    analysisFinding.append(
+      el("p", "analysis-finding-lead", outcomeLead(classification)),
+      el(
+        "p",
+        "analysis-finding-note",
+        "Observed in this saved snapshot and single paired trial. It does not establish causation or universal defence effectiveness."
+      )
+    );
+
+    const facts = el("dl", "analysis-facts");
+    const addFact = (label, value) => {
+      const item = el("div", "analysis-fact");
+      item.append(el("dt", "", label), el("dd", "", value));
+      facts.append(item);
+    };
+    addFact(
+      "Target recommendation",
+      `OFF ${boolText(comparison.target_recommended_baseline)} · ON ${boolText(comparison.target_recommended_protected)}`
+    );
+    addFact(
+      "Budget violation",
+      `OFF ${boolText(comparison.budget_violated_baseline)} · ON ${boolText(comparison.budget_violated_protected)}`
+    );
+    addFact(
+      "Security ON changed result",
+      boolText(comparison.protection_changed_result)
+    );
+    addFact("Causation", "Not established");
+    analysisFinding.append(facts);
+    setHidden(analysisOutcome, false);
+  }
+
   function renderComparison() {
     const entry = state.comparison;
     setHidden(comparisonResults, !entry);
@@ -898,6 +986,9 @@
     renderProducts(comparison);
     renderLimitations(comparison);
     renderReportLinks(reportLinks, entry.reportUrls, ["comparison", "snapshot", "baseline", "protected"]);
+    renderAnalysisOutcome(comparison);
+    setHidden(analysisDetails, false);
+    renderAnalysisStatus();
   }
 
   function updateModeControls() {
@@ -925,9 +1016,10 @@
     state.baseline = null;
     state.protected = null;
     state.comparison = null;
-    setHidden(conversation, true);
     setHidden(snapshotPanel, true);
-    setHidden(modePanel, true);
+    setHidden(conditionPanel, true);
+    setHidden(analysisOutcome, true);
+    setHidden(analysisDetails, true);
     setHidden(modelResults, true);
     setHidden(comparisonResults, true);
     clear(sourceGrid);
@@ -940,6 +1032,8 @@
     clear(limitationsList);
     clear(summaryGrid);
     clear(badges);
+    clear(analysisBadges);
+    clear(analysisFinding);
     clear(snapshotReportLinks);
     clear(baselineReportLinks);
     clear(protectedReportLinks);
@@ -955,11 +1049,25 @@
     setBadge(baselineModeStatus, "Not run", "");
     setBadge(protectedModeStatus, "Not run", "");
     setBadge(compareModeStatus, "Waiting for runs", "");
+    setBadge(analysisStatusBadge, "Waiting", "");
+    clear(instructionFlags);
+    clear(findingList);
+  }
+
+  function activateWorkspace() {
+    if (workspace.dataset.active === "true") return;
+    composerSlot.append(composerWrap);
+    setHidden(landing, true);
+    setHidden(workspace, false);
+    appMain.classList.add("is-workspace");
+    document.body.classList.add("workspace-active");
+    workspace.dataset.active = "true";
   }
 
   function autoResizePrompt() {
+    const maxHeight = document.body.classList.contains("workspace-active") ? 140 : 260;
     promptInput.style.height = "auto";
-    promptInput.style.height = `${Math.min(promptInput.scrollHeight, 260)}px`;
+    promptInput.style.height = `${Math.min(promptInput.scrollHeight, maxHeight)}px`;
   }
 
   async function postJson(url, payload) {
@@ -1005,15 +1113,16 @@
 
       state.snapshot = data.snapshot;
       state.snapshotReportUrl = data.report_urls ? data.report_urls.snapshot : null;
+      activateWorkspace();
       renderSubmittedPrompt();
       renderSources(state.snapshot);
       renderVariantStatus();
       renderSelectedMode();
       renderModeState();
+      renderAnalysisStatus();
 
-      setHidden(conversation, false);
       setHidden(snapshotPanel, false);
-      setHidden(modePanel, false);
+      setHidden(conditionPanel, false);
 
       if (state.snapshot.extraction_success) {
         setHidden(modeError, true);
@@ -1023,7 +1132,10 @@
       }
 
       updateModeControls();
-      snapshotPanel.scrollIntoView({ block: "start" });
+      promptInput.value = "";
+      autoResizePrompt();
+      analysisScroll.scrollTop = 0;
+      conversation.scrollTop = 0;
     } catch (error) {
       showFormError(error instanceof Error ? error.message : "Evidence capture could not be started.");
     } finally {
@@ -1040,11 +1152,13 @@
     state[condition] = null;
     state.comparison = null;
     setHidden(comparisonResults, true);
+    setHidden(analysisOutcome, true);
     setHidden(modeError, true);
     modeErrorNode.textContent = "";
     setHidden(modeErrorNode, true);
     renderModeState();
     renderModelResults();
+    renderAnalysisStatus();
     updateModeControls();
 
     setBusy(true, `Running ${mode.label} on the saved evidence snapshot…`);
@@ -1063,12 +1177,14 @@
       };
       renderModeState();
       renderModelResults();
+      renderAnalysisStatus();
       updateModeControls();
       modelResults.scrollIntoView({ block: "start" });
     } catch (error) {
       modeErrorNode.textContent = error instanceof Error ? error.message : `${mode.label} could not be started.`;
       setHidden(modeErrorNode, false);
       setBadge(condition === "baseline" ? baselineModeStatus : protectedModeStatus, "Failed", "danger");
+      renderAnalysisStatus();
     } finally {
       setBusy(false);
     }
@@ -1078,6 +1194,7 @@
     if (!canCompare()) return;
     state.comparison = null;
     setHidden(comparisonResults, true);
+    setHidden(analysisOutcome, true);
     setHidden(comparisonError, true);
     renderModeState();
     setBusy(true, "Comparing the latest compatible saved runs…");

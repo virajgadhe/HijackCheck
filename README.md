@@ -6,7 +6,7 @@ HijackCheck is an AI security research project built during the **Hacktober Hack
 
 The project investigates indirect prompt injection: a situation where instructions embedded in webpage content attempt to influence an AI system processing that content.
 
-The current interface, **HijackCheck · AI VIBE CHECK**, is a compact research workspace: one composer accepts the natural-language research task and all three source URLs, then the workspace shows genuine capture status, the saved evidence snapshot, Security OFF and Security ON responses, deterministic validation, and the paired comparison.
+The current interface is a focused research workspace: one composer accepts the natural-language research task and all three source URLs, then a split screen shows genuine capture status, the saved evidence snapshot, Security OFF and Security ON responses, deterministic validation, and the paired comparison.
 
 HijackCheck compares two conditions:
 
@@ -37,7 +37,7 @@ HijackCheck provides a controlled environment for investigating this question us
 - **Paired comparison:** Compares compatible baseline and protected runs.
 - **Experiment reports:** Stores actual requests, responses, diagnostics, and evaluation results as JSON.
 - **Single-prompt composer:** Parses the research task and all source URLs from one editable prompt, including the controlled attack variant encoded in the URL.
-- **Conversation-style workspace:** Shows the submitted request, captured sources, evidence status, model responses, and paired comparison in one continuous workflow.
+- **Split research workspace:** Keeps evidence, condition status, instruction flow, validation, and the final observed finding in a left analysis panel while the conversation, model responses, and paired comparison stay on the right.
 - **Safe response rendering:** Renders supported Markdown with DOM nodes instead of injecting model output as HTML.
 - **Error handling:** Records model failures, retries transient errors, and avoids treating failed requests as successful results.
 
@@ -79,23 +79,24 @@ One research prompt containing the task + three webpage URLs
 
 Both security conditions use the same saved evidence snapshot when compared. The application does not replace a failed response with the other condition's answer.
 
-## The AI VIBE CHECK Interface
+## The Interface
 
-The main screen is intentionally compact:
+The initial screen is intentionally compact:
 
-- A compact **HijackCheck** header with a small **AI VIBE CHECK** identity label.
+- A compact **HijackCheck** header with no secondary identity label.
+- The heading **What would you like to investigate?**
 - One prompt composer for both the research instruction and all source URLs.
 - `Enter` submits the request; `Shift+Enter` inserts a newline.
+- Empty and duplicate submissions are rejected.
 - No separate resource fields and no separate attack-variant dropdown.
 
-After a valid request, the same page becomes a research workspace:
+After a valid request, the page becomes a split research workspace:
 
-1. The submitted prompt is shown as the user's request.
-2. The three captured sources are listed with genuine page titles, hostnames, extraction status, HTTP status, and controlled variant.
-3. The saved evidence snapshot identifier and completeness are shown.
-4. Security OFF and Security ON can be run against that same snapshot.
-5. The actual model responses appear in balanced panels; failures stay attached to the mode that failed.
-6. The paired comparison shows observed outcomes, deterministic validation, limitations, and links to saved reports.
+1. The left analysis panel shows captured sources, extraction status, the saved evidence snapshot, security-condition status, instruction-flow signals, recommendation and budget validation, captured facts, limitations, and the final observed finding.
+2. The right conversation panel shows the submitted request, security-mode controls, the actual Security OFF and Security ON responses, and the observed comparison.
+3. The composer shrinks and stays anchored at the bottom of the right panel while the conversation and analysis scroll independently.
+4. Failures remain attached to the mode that failed; one condition never borrows the other condition's response.
+5. Saved JSON reports remain linked and all evidence snapshots are preserved.
 
 Example prompt (editable and not a guaranteed-working source set):
 

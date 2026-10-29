@@ -134,10 +134,16 @@ def test_index_renders_single_composer_workspace_without_secret(tmp_path):
 
     assert response.status_code == 200
     assert "HijackCheck" in html
-    assert "AI VIBE CHECK" in html
+    assert "AI VIBE CHECK" not in html
+    assert "What would you like to investigate?" in html
+    assert 'id="landing"' in html
+    assert 'id="workspace"' in html
+    assert 'id="analysis-panel"' in html
+    assert 'id="conversation-panel"' in html
+    assert 'id="composer-slot"' in html
     assert 'id="capture-form"' in html
     assert 'id="prompt"' in html
-    assert 'placeholder="Describe what you want to research and include the webpage URLs...' in html
+    assert 'placeholder="Describe what you want to investigate and include the webpage URLs...' in html
     assert 'id="capture-button"' in html
     assert 'id="run-research-button"' in html
     assert 'id="compare-button"' in html
@@ -160,8 +166,8 @@ def test_index_renders_single_composer_workspace_without_secret(tmp_path):
     assert "Resource 3" not in html
     assert "Security OFF" in html
     assert "Security ON" in html
-    assert "Captured sources" in html
-    assert "Controlled page:" in html
+    assert "Sources and evidence" in html
+    assert "Variants:" in html
     assert "http://localhost/lab/attack-page" in html
     assert "?variant=hidden" in html
     assert "https://system76.com/laptops/lemur-pro" not in html

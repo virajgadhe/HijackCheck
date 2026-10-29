@@ -314,7 +314,7 @@ def test_dashboard_keeps_mode_results_independent_and_gates_comparison(
     submit_prompt(page)
 
     expect(page.locator("#snapshot-panel")).to_be_visible()
-    expect(page.locator("#mode-panel")).to_be_visible()
+    expect(page.locator("#condition-panel")).to_be_visible()
     expect(page.locator("#compare-button")).to_be_disabled()
     expect(page.locator("#source-grid")).to_contain_text("HTTP 200")
     expect(page.locator("#source-grid")).to_contain_text("2 capture attempts")
@@ -588,4 +588,112 @@ def test_dashboard_composer_supports_shift_enter_and_enter_to_submit(
     capture_requests = [item for item in seen if item["path"] == "/api/capture"]
     assert len(capture_requests) == 1
     assert capture_requests[0]["body"]["prompt"].startswith("Research these webpages.")
+    context.close()
+
+
+def test_dashboard_initial_screen_has_exact_heading_and_compact_header(
+    dashboard_server, chromium
+):
+    context = chromium.new_context(viewport={"width": 1440, "height": 900})
+    page = context.new_page()
+    page.goto(dashboard_server)
+
+    expect(page.locator("#landing-title")).to_have_text(
+        "What would you like to investigate?"
+    )
+    expect(page.locator("#landing")).to_be_visible()
+    expect(page.locator("#workspace")).to_be_hidden()
+    expect(page.locator(".topbar-inner > *")).to_have_count(1)
+    expect(page.locator(".brand")).to_have_text("HijackCheck")
+    expect(page.locator("body")).not_to_contain_text("AI VIBE CHECK")
+    expect(page.locator("#composer-home #capture-form")).to_be_visible()
+    expect(page.locator("#composer-slot #capture-form")).to_have_count(0)
+    context.close()
+
+
+def test_dashboard_becomes_split_workspace_with_anchored_composer(
+    dashboard_server, chromium
+):
+    for width, height in ((1440, 900), (1280, 800)):
+        context = chromium.new_context(viewport={"width": width, "height": height})
+        page = context.new_page()
+        install_api_routes(page)
+        page.goto(dashboard_server)
+        submit_prompt(page)
+
+        expect(page.locator("#landing")).to_be_hidden()
+        expect(page.locator("#workspace")).to_be_visible()
+        expect(page.locator("#analysis-panel")).to_be_visible()
+        expect(page.locator("#conversation-panel")).to_be_visible()
+        expect(page.locator("#composer-slot #capture-form")).to_be_visible()
+        expect(page.locator("#composer-home #capture-form")).to_have_count(0)
+
+        analysis = page.locator("#analysis-panel").bounding_box()
+        conversation = page.locator("#conversation-panel").bounding_box()
+        composer_slot = page.locator("#composer-slot").bounding_box()
+        assert analysis and conversation and composer_slot
+        ratio = analysis["width"] / (analysis["width"] + conversation["width"])
+        assert 0.35 <= ratio <= 0.40, (width, ratio)
+        assert abs(
+            (composer_slot["y"] + composer_slot["height"])
+            - (conversation["y"] + conversation["height"])
+        ) <= 2
+        assert composer_slot["x"] >= conversation["x"]
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth"
+        )
+
+        page.locator("#run-research-button").click()
+        expect(page.locator("#model-results")).to_be_visible()
+        expect(page.locator("#snapshot-panel")).to_be_visible()
+        context.close()
+
+
+def test_dashboard_comparison_appears_in_both_panels(dashboard_server, chromium):
+    context = chromium.new_context(viewport={"width": 1440, "height": 900})
+    page = context.new_page()
+    install_api_routes(page)
+    page.goto(dashboard_server)
+    submit_prompt(page)
+    page.locator("#run-research-button").click()
+    page.locator('label[for="security-on"]').click()
+    page.locator("#run-research-button").click()
+    page.locator("#compare-button").click()
+
+    expect(page.locator("#analysis-outcome")).to_be_visible()
+    expect(page.locator("#analysis-badges")).to_contain_text("Attack demonstrated")
+    expect(page.locator("#analysis-finding")).to_contain_text(
+        "Security OFF response demonstrated the observed unsafe recommendation"
+    )
+    expect(page.locator("#analysis-finding")).to_contain_text("OFF Yes · ON No")
+    expect(page.locator("#analysis-finding")).to_contain_text(
+        "Causation"
+    )
+    expect(page.locator("#comparison-results")).to_be_visible()
+    expect(page.locator("#summary-grid")).to_contain_text(
+        "Observed outcome"
+    )
+    context.close()
+
+
+def test_dashboard_prevents_duplicate_submissions(dashboard_server, chromium):
+    context = chromium.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    seen = []
+    install_api_routes(page, seen=seen)
+    page.goto(dashboard_server)
+
+    page.locator("#prompt").fill(
+        "Research these webpages.\n"
+        "https://example.com/one\n"
+        "https://example.com/two\n"
+        "http://127.0.0.1:5000/lab/attack-page?variant=hidden"
+    )
+    page.evaluate(
+        "() => { const form = document.getElementById('capture-form');"
+        " form.requestSubmit(); form.requestSubmit(); }"
+    )
+    expect(page.locator("#workspace")).to_be_visible()
+    capture_requests = [item for item in seen if item["path"] == "/api/capture"]
+    assert len(capture_requests) == 1
     context.close()
