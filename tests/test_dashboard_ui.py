@@ -587,7 +587,11 @@ def test_dashboard_composer_supports_shift_enter_and_enter_to_submit(
     expect(page.locator("#conversation")).to_be_visible()
     capture_requests = [item for item in seen if item["path"] == "/api/capture"]
     assert len(capture_requests) == 1
-    assert capture_requests[0]["body"]["prompt"].startswith("Research these webpages.")
+    sent_prompt = capture_requests[0]["body"]["prompt"]
+    assert sent_prompt.startswith("Research these webpages.")
+    assert "https://example.com/one" in sent_prompt
+    assert "https://example.com/two" in sent_prompt
+    assert "/lab/attack-page?variant=visible" in sent_prompt
     context.close()
 
 
@@ -608,6 +612,50 @@ def test_dashboard_initial_screen_has_exact_heading_and_compact_header(
     expect(page.locator("body")).not_to_contain_text("AI VIBE CHECK")
     expect(page.locator("#composer-home #capture-form")).to_be_visible()
     expect(page.locator("#composer-slot #capture-form")).to_have_count(0)
+
+    prompt = page.locator("#prompt")
+    expect(prompt).to_have_attribute(
+        "placeholder",
+        "Describe your research task and paste the webpage URLs...",
+    )
+    expect(prompt).to_have_attribute("aria-describedby", "composer-hint")
+    expect(page.locator("#composer-hint")).to_have_text(
+        "Enter to run · Shift + Enter for a new line"
+    )
+    expect(page.locator("#composer-help")).to_have_count(0)
+    expect(page.locator("#capture-form #capture-button")).to_contain_text(
+        "Run Research"
+    )
+
+    prompt_box = prompt.bounding_box()
+    form_box = page.locator("#capture-form").bounding_box()
+    button_box = page.locator("#capture-button").bounding_box()
+    assert prompt_box and form_box and button_box
+    assert prompt_box["height"] >= 150
+    assert button_box["x"] >= form_box["x"]
+    assert button_box["x"] + button_box["width"] <= form_box["x"] + form_box["width"]
+    assert button_box["y"] + button_box["height"] <= form_box["y"] + form_box["height"]
+    assert button_box["y"] > form_box["y"] + form_box["height"] / 2
+    context.close()
+
+
+def test_dashboard_composer_is_responsive_on_mobile(dashboard_server, chromium):
+    context = chromium.new_context(viewport={"width": 390, "height": 844})
+    page = context.new_page()
+    page.goto(dashboard_server)
+
+    expect(page.locator("#prompt")).to_be_visible()
+    expect(page.locator("#composer-hint")).to_be_visible()
+    expect(page.locator("#capture-button")).to_be_visible()
+    expect(page.locator("#composer-help")).to_have_count(0)
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= window.innerWidth"
+    )
+    form_box = page.locator("#capture-form").bounding_box()
+    button_box = page.locator("#capture-button").bounding_box()
+    assert form_box and button_box
+    assert button_box["x"] >= form_box["x"]
+    assert button_box["x"] + button_box["width"] <= form_box["x"] + form_box["width"]
     context.close()
 
 
@@ -627,6 +675,8 @@ def test_dashboard_becomes_split_workspace_with_anchored_composer(
         expect(page.locator("#conversation-panel")).to_be_visible()
         expect(page.locator("#composer-slot #capture-form")).to_be_visible()
         expect(page.locator("#composer-home #capture-form")).to_have_count(0)
+        workspace_prompt = page.locator("#prompt").bounding_box()
+        assert workspace_prompt and workspace_prompt["height"] <= 80
 
         analysis = page.locator("#analysis-panel").bounding_box()
         conversation = page.locator("#conversation-panel").bounding_box()

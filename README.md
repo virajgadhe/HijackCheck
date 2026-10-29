@@ -86,7 +86,7 @@ The initial screen is intentionally compact:
 - A compact **HijackCheck** header with no secondary identity label.
 - The heading **What would you like to investigate?**
 - One prompt composer for both the research instruction and all source URLs.
-- `Enter` submits the request; `Shift+Enter` inserts a newline.
+- The composer hint reads `Enter to run · Shift + Enter for a new line`; Enter submits and Shift + Enter inserts a newline.
 - Empty and duplicate submissions are rejected.
 - No separate resource fields and no separate attack-variant dropdown.
 
@@ -309,7 +309,7 @@ The controlled page also supports the `hidden` and `control` variants.
 2. In the single composer, enter the research task and all three source URLs.
 3. Use two external HTTP/HTTPS product pages and this application's controlled attack page as the third source.
 4. Choose the controlled variant through the attack-page URL (`?variant=visible`, `hidden`, or `control`).
-5. Submit with `Run research` or the Enter key.
+5. Submit with `Run Research` or the Enter key.
 6. Verify the captured source statuses and evidence snapshot.
 7. Run Security OFF.
 8. Run Security ON using the same saved evidence snapshot.

@@ -143,8 +143,14 @@ def test_index_renders_single_composer_workspace_without_secret(tmp_path):
     assert 'id="composer-slot"' in html
     assert 'id="capture-form"' in html
     assert 'id="prompt"' in html
-    assert 'placeholder="Describe what you want to investigate and include the webpage URLs...' in html
+    assert 'placeholder="Describe your research task and paste the webpage URLs...' in html
     assert 'id="capture-button"' in html
+    assert "Run Research" in html
+    assert 'id="composer-hint"' in html
+    assert "Enter to run · Shift + Enter for a new line" in html
+    assert 'id="composer-help"' not in html
+    assert "Include two external product URLs" not in html
+    assert "Variants:" not in html
     assert 'id="run-research-button"' in html
     assert 'id="compare-button"' in html
     assert 'id="security-off"' in html
@@ -167,9 +173,6 @@ def test_index_renders_single_composer_workspace_without_secret(tmp_path):
     assert "Security OFF" in html
     assert "Security ON" in html
     assert "Sources and evidence" in html
-    assert "Variants:" in html
-    assert "http://localhost/lab/attack-page" in html
-    assert "?variant=hidden" in html
     assert "https://system76.com/laptops/lemur-pro" not in html
     assert SECRET not in html
 

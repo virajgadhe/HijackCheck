@@ -25,8 +25,8 @@
         <div class="landing-inner">
           <h1 id="landing-title">What would you like to investigate?</h1>
           <p class="landing-subtitle">
-            Add two product pages and one controlled attack page. HijackCheck
-            captures the evidence, then compares Security OFF with Security ON.
+            Paste two product pages and one controlled attack page, then compare
+            Security OFF with Security ON.
           </p>
 
           <div class="composer-home" id="composer-home">
@@ -38,29 +38,22 @@
                 <textarea
                   id="prompt"
                   name="prompt"
-                  rows="1"
+                  rows="3"
                   spellcheck="true"
-                  aria-describedby="composer-help"
-                  placeholder="Describe what you want to investigate and include the webpage URLs..."
+                  aria-describedby="composer-hint"
+                  placeholder="Describe your research task and paste the webpage URLs..."
                 ></textarea>
                 <div class="composer-bar">
-                  <p class="composer-help" id="composer-help">
-                    Include two external product URLs and one controlled page,
-                    for example
-                    <code>{{ attack_url }}?variant=hidden</code>.
-                    Variants: <code>visible</code>, <code>hidden</code>,
-                    <code>control</code>.
-                  </p>
+                  <span class="composer-shortcut" id="composer-hint"
+                    >Enter to run · Shift + Enter for a new line</span
+                  >
                   <div class="composer-actions">
-                    <span class="composer-shortcut"
-                      >Enter to run · Shift+Enter for a new line</span
-                    >
                     <button
                       class="primary-button"
                       id="capture-button"
                       type="submit"
                     >
-                      <span>Run research</span>
+                      <span>Run Research</span>
                       <span class="button-enter" aria-hidden="true">↵</span>
                     </button>
                   </div>

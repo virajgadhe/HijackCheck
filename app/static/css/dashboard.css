@@ -148,7 +148,7 @@ body.workspace-active .site-footer {
 }
 
 .landing-subtitle {
-  max-width: 620px;
+  max-width: 720px;
   margin: 0 auto 2.2rem;
   color: var(--faint);
   font-size: 0.88rem;
@@ -159,6 +159,28 @@ body.workspace-active .site-footer {
 .composer-home {
   width: min(780px, 100%);
   margin: 0 auto;
+}
+
+.composer-home .composer {
+  padding: 0.45rem 0.45rem 0;
+}
+
+.composer-home #prompt {
+  min-height: 152px;
+  padding: 1rem 1.1rem 0.65rem;
+  border: 1px solid #303036;
+  border-radius: 13px;
+  background: #0f0f11;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.composer-home #prompt:hover {
+  border-color: #3b3b41;
+}
+
+.composer-home #prompt:focus {
+  border-color: var(--accent-line);
+  background: #101013;
 }
 
 .composer-wrap {
@@ -200,11 +222,7 @@ body.workspace-active .site-footer {
 }
 
 .composer-slot .composer-bar {
-  padding: 0.45rem 0.6rem 0.55rem 1rem;
-}
-
-.composer-slot .composer-help {
-  display: none;
+  padding: 0.45rem 0.6rem 0.55rem 0.8rem;
 }
 
 .composer-slot .composer-shortcut {
@@ -235,13 +253,14 @@ body.workspace-active .site-footer {
   resize: none;
   overflow-y: auto;
   background: transparent;
+  caret-color: var(--accent);
   color: var(--text);
   font-size: 1rem;
   line-height: 1.65;
 }
 
 #prompt::placeholder {
-  color: #76767b;
+  color: #86868c;
 }
 
 .composer-bar {
@@ -250,19 +269,6 @@ body.workspace-active .site-footer {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.7rem 0.8rem 0.75rem 1.2rem;
-}
-
-.composer-help {
-  max-width: 520px;
-  margin: 0;
-  color: var(--faint);
-  font-size: 0.72rem;
-  line-height: 1.5;
-}
-
-.composer-help code {
-  color: var(--muted);
-  font-size: 0.68rem;
 }
 
 .composer-actions {
@@ -274,7 +280,8 @@ body.workspace-active .site-footer {
 
 .composer-shortcut {
   color: var(--faint);
-  font-size: 0.68rem;
+  font-size: 0.7rem;
+  line-height: 1.5;
   white-space: nowrap;
 }
 
@@ -1345,10 +1352,6 @@ td.empty {
     padding: 0.7rem 0.9rem 0.9rem;
   }
 
-  .composer-shortcut {
-    display: none;
-  }
-
   .flag-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1380,10 +1383,6 @@ td.empty {
     padding-inline: 0.9rem;
   }
 
-  .composer-slot .composer-shortcut {
-    display: none;
-  }
-
   .composer-bar,
   .section-head,
   .experiment-controls {
@@ -1396,8 +1395,8 @@ td.empty {
     padding: 0.7rem 0.75rem 0.75rem;
   }
 
-  .composer-help {
-    max-width: none;
+  .composer-shortcut {
+    white-space: normal;
   }
 
   .composer-actions,

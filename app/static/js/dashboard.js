@@ -1057,6 +1057,7 @@
   function activateWorkspace() {
     if (workspace.dataset.active === "true") return;
     composerSlot.append(composerWrap);
+    promptInput.rows = 1;
     setHidden(landing, true);
     setHidden(workspace, false);
     appMain.classList.add("is-workspace");
