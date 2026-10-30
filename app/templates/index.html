@@ -25,8 +25,9 @@
         <div class="landing-inner">
           <h1 id="landing-title">What would you like to investigate?</h1>
           <p class="landing-subtitle">
-            Paste two product pages and one controlled attack page, then compare
-            Security OFF with Security ON.
+            Investigate indirect prompt injection by examining how AI models
+            interpret untrusted webpage content and evaluating their behaviour
+            with and without security defences.
           </p>
 
           <div class="composer-home" id="composer-home">
@@ -87,17 +88,58 @@
         <aside
           class="analysis-panel"
           id="analysis-panel"
-          aria-label="Security analysis"
+          aria-label="Research analysis"
         >
           <div class="panel-heading">
             <div>
-              <p class="panel-eyebrow">Security analysis</p>
-              <h2>Evidence and findings</h2>
+              <h2>Research Analysis</h2>
+              <p class="panel-subtitle">
+                Investigating how AI models interpret untrusted webpage content
+                and evaluating their behaviour with and without security
+                defences.
+              </p>
             </div>
-            <span class="badge" id="analysis-status-badge">Waiting</span>
           </div>
 
           <div class="analysis-scroll" id="analysis-scroll">
+            <section
+              id="research-status-panel"
+              class="analysis-section"
+              aria-labelledby="research-status-heading"
+            >
+              <div class="section-head status-head">
+                <div>
+                  <h3 id="research-status-heading">Research Status</h3>
+                  <p class="section-note" id="research-status-note">
+                    Submit a research task to begin.
+                  </p>
+                </div>
+                <span class="badge" id="analysis-status-badge">Waiting</span>
+              </div>
+              <div class="research-status-row">
+                <span
+                  class="status-dot"
+                  id="research-status-dot"
+                  aria-hidden="true"
+                ></span>
+                <span id="research-status-text">Waiting for request</span>
+                <div
+                  class="progress-track"
+                  role="progressbar"
+                  aria-label="Evidence capture progress"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="0"
+                  id="research-progress"
+                >
+                  <div class="progress-fill" id="research-progress-bar"></div>
+                </div>
+                <span class="progress-label" id="research-progress-label"
+                  >0 / 3 sources captured</span
+                >
+              </div>
+            </section>
+
             <section
               id="snapshot-panel"
               class="analysis-section"
@@ -106,16 +148,60 @@
             >
               <div class="section-head">
                 <div>
-                  <h2 id="sources-heading">Sources and evidence</h2>
+                  <h3 id="sources-heading">Sources and Evidence</h3>
                   <p class="section-note" id="snapshot-note"></p>
                 </div>
-                <div
-                  class="report-links"
-                  id="snapshot-report-links"
-                ></div>
+                <div class="report-links" id="snapshot-report-links"></div>
               </div>
               <div class="source-list" id="source-grid"></div>
               <p class="note" id="controlled-note" hidden></p>
+            </section>
+
+            <section
+              id="injection-panel"
+              class="analysis-section"
+              hidden
+              aria-labelledby="injection-heading"
+            >
+              <div class="section-head">
+                <div>
+                  <h3 id="injection-heading">Injection Findings</h3>
+                  <p class="section-note">
+                    Detection, extraction, inclusion, and influence are separate
+                    stages.
+                  </p>
+                </div>
+              </div>
+              <dl class="findings-list">
+                <div class="finding-row">
+                  <dt>Potential injection detected in page</dt>
+                  <dd id="injection-detected">Not evaluated</dd>
+                </div>
+                <div class="finding-row">
+                  <dt>Injection content extracted</dt>
+                  <dd id="injection-extracted">Pending evidence</dd>
+                </div>
+                <div class="finding-row">
+                  <dt>Injection content included in model request</dt>
+                  <dd id="injection-included">Pending comparison</dd>
+                </div>
+                <div class="finding-row">
+                  <dt>Evidence of model response influenced</dt>
+                  <dd id="injection-influenced">Pending comparison</dd>
+                </div>
+              </dl>
+              <p class="section-note" id="injection-note"></p>
+
+              <details class="compact-panel" id="injection-details">
+                <summary>
+                  <span>Detection evidence</span>
+                  <span class="compact-meta">Heuristic, not attack proof</span>
+                </summary>
+                <div class="compact-content">
+                  <div class="flag-grid" id="instruction-flags"></div>
+                  <div class="finding-list" id="finding-list"></div>
+                </div>
+              </details>
             </section>
 
             <section
@@ -126,7 +212,7 @@
             >
               <div class="section-head">
                 <div>
-                  <h2 id="condition-heading">Security conditions</h2>
+                  <h3 id="condition-heading">Security Conditions</h3>
                   <p class="section-note">
                     Each mode reads the same saved evidence snapshot.
                   </p>
@@ -138,158 +224,40 @@
                 ></span>
               </div>
 
-              <div class="mode-status-row">
-                <div class="mode-status-panel">
-                  <div class="mode-status-top">
+              <div class="condition-list">
+                <div class="condition-row">
+                  <span class="condition-icon" aria-hidden="true"></span>
+                  <div class="condition-main">
                     <span class="mode-name">Security OFF</span>
-                    <span class="badge" id="baseline-mode-status">Not run</span>
+                    <span class="condition-desc"
+                      >Run with captured evidence (baseline)</span
+                    >
+                    <p class="mode-error" id="baseline-mode-error" hidden></p>
+                    <div
+                      class="report-links"
+                      id="baseline-report-links"
+                    ></div>
                   </div>
-                  <p class="mode-error" id="baseline-mode-error" hidden></p>
-                  <div class="report-links" id="baseline-report-links"></div>
+                  <span class="badge" id="baseline-mode-status">Not run</span>
                 </div>
-                <div class="mode-status-panel">
-                  <div class="mode-status-top">
+                <div class="condition-row">
+                  <span class="condition-icon" aria-hidden="true"></span>
+                  <div class="condition-main">
                     <span class="mode-name">Security ON</span>
-                    <span class="badge" id="protected-mode-status"
-                      >Not run</span
+                    <span class="condition-desc"
+                      >Run with Python-based protection</span
                     >
+                    <p class="mode-error" id="protected-mode-error" hidden></p>
+                    <div
+                      class="report-links"
+                      id="protected-report-links"
+                    ></div>
                   </div>
-                  <p class="mode-error" id="protected-mode-error" hidden></p>
-                  <div class="report-links" id="protected-report-links"></div>
-                </div>
-                <div class="mode-status-panel">
-                  <div class="mode-status-top">
-                    <span class="mode-name">Comparison</span>
-                    <span class="badge" id="compare-mode-status"
-                      >Waiting for runs</span
-                    >
-                  </div>
-                  <p class="mode-error" id="compare-mode-error" hidden></p>
+                  <span class="badge" id="protected-mode-status">Not run</span>
                 </div>
               </div>
 
-              <p class="alert alert-error" id="mode-error" role="alert" hidden></p>
-            </section>
-
-            <section
-              id="analysis-outcome"
-              class="analysis-section"
-              hidden
-              aria-labelledby="outcome-heading"
-            >
-              <div class="section-head">
-                <div>
-                  <h2 id="outcome-heading">Final observed finding</h2>
-                  <p class="section-note">
-                    Observation from this single paired trial only.
-                  </p>
-                </div>
-                <div class="badge-row" id="analysis-badges"></div>
-              </div>
-              <div class="analysis-finding" id="analysis-finding"></div>
-            </section>
-
-            <section
-              id="analysis-details"
-              class="analysis-section"
-              hidden
-              aria-label="Detailed analysis"
-            >
-              <details class="compact-panel" open>
-                <summary>
-                  <span>Instruction flow</span>
-                  <span class="compact-meta"
-                    >Heuristic detection, not attack proof</span
-                  >
-                </summary>
-                <div class="compact-content">
-                  <div class="flag-grid" id="instruction-flags"></div>
-                  <div class="finding-list" id="finding-list"></div>
-                </div>
-              </details>
-
-              <details class="compact-panel">
-                <summary>
-                  <span>Recommendation and budget validation</span>
-                  <span class="compact-meta"
-                    >Deterministic checks when applicable</span
-                  >
-                </summary>
-                <div class="compact-content">
-                  <div class="validation-grid" id="validation-grid"></div>
-                </div>
-              </details>
-
-              <details class="compact-panel">
-                <summary>
-                  <span>Captured facts</span>
-                  <span class="compact-meta"
-                    >Structured values from saved evidence</span
-                  >
-                </summary>
-                <div class="compact-content">
-                  <div class="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th scope="col">Item</th>
-                          <th scope="col">Captured value</th>
-                          <th scope="col">Currency</th>
-                          <th scope="col">Normalized INR</th>
-                          <th scope="col">Constraint status</th>
-                          <th scope="col">Reason</th>
-                        </tr>
-                      </thead>
-                      <tbody id="products-body"></tbody>
-                    </table>
-                  </div>
-                </div>
-              </details>
-
-              <details class="compact-panel">
-                <summary><span>Limitations</span></summary>
-                <div class="compact-content">
-                  <ul class="limitations" id="limitations-list"></ul>
-                </div>
-              </details>
-
-              <details class="compact-panel">
-                <summary><span>Saved reports</span></summary>
-                <div class="compact-content">
-                  <div class="report-links" id="report-links"></div>
-                </div>
-              </details>
-            </section>
-          </div>
-        </aside>
-
-        <section
-          class="conversation-panel"
-          id="conversation-panel"
-          aria-label="Research conversation"
-        >
-          <div class="conversation-scroll" id="conversation">
-            <article class="user-turn">
-              <p class="turn-label">Your request</p>
-              <p id="submitted-prompt" class="submitted-prompt"></p>
-            </article>
-
-            <section
-              id="run-panel"
-              class="workspace-section run-panel"
-              aria-labelledby="experiment-heading"
-            >
-              <div class="section-head">
-                <div>
-                  <h2 id="experiment-heading">Run experiment</h2>
-                  <p class="section-note">
-                    Run both security conditions, then compare compatible
-                    saved results.
-                  </p>
-                </div>
-              </div>
-
-              <div class="experiment-controls">
+              <div class="condition-controls">
                 <fieldset class="security-switch">
                   <legend class="sr-only">Security mode</legend>
                   <div class="security-options">
@@ -337,60 +305,189 @@
                 The unprotected baseline sends captured evidence directly to
                 Gemma.
               </p>
+              <p
+                class="alert alert-error"
+                id="mode-error"
+                role="alert"
+                hidden
+              ></p>
             </section>
 
             <section
-              id="model-results"
-              class="workspace-section"
-              hidden
-              aria-labelledby="responses-heading"
-            >
-              <div class="section-head">
-                <div>
-                  <h2 id="responses-heading">Model responses</h2>
-                  <p class="section-note">
-                    Each panel shows only its own run. A failed mode never
-                    borrows the other response.
-                  </p>
-                </div>
-                <div class="badge-row" id="model-badges"></div>
-              </div>
-
-              <div
-                class="response-grid"
-                id="response-grid"
-                aria-live="polite"
-              ></div>
-            </section>
-
-            <section
-              id="comparison-results"
-              class="workspace-section"
+              id="comparison-panel"
+              class="analysis-section"
               hidden
               aria-labelledby="comparison-heading"
             >
               <div class="section-head">
                 <div>
-                  <h2 id="comparison-heading">Observed comparison</h2>
-                  <p class="section-note">
-                    Single paired trials describe observations, not proof of
-                    causation.
+                  <h3 id="comparison-heading">Comparison</h3>
+                  <p class="section-note" id="comparison-note">
+                    Run both security conditions to compare compatible saved
+                    results.
                   </p>
                 </div>
-                <div class="badge-row" id="result-badges"></div>
+                <span class="badge" id="compare-mode-status"
+                  >Waiting for runs</span
+                >
               </div>
-
               <p
                 class="alert alert-error"
-                id="comparison-error"
+                id="compare-mode-error"
                 role="alert"
                 hidden
               ></p>
-              <div class="summary-grid" id="summary-grid"></div>
+
+              <section
+                id="model-results"
+                class="workspace-section"
+                hidden
+                aria-labelledby="responses-heading"
+              >
+                <div class="section-head">
+                  <div>
+                    <h3 id="responses-heading">Model responses</h3>
+                    <p class="section-note">
+                      Each panel shows only its own run. A failed mode never
+                      borrows the other response.
+                    </p>
+                  </div>
+                  <div class="badge-row" id="model-badges"></div>
+                </div>
+
+                <div
+                  class="response-grid"
+                  id="response-grid"
+                  aria-live="polite"
+                ></div>
+              </section>
+
+              <section
+                id="comparison-results"
+                class="workspace-section"
+                hidden
+                aria-labelledby="observed-comparison-heading"
+              >
+                <div class="section-head">
+                  <div>
+                    <h3 id="observed-comparison-heading">
+                      Observed comparison
+                    </h3>
+                    <p class="section-note">
+                      Single paired trials describe observations, not proof of
+                      causation.
+                    </p>
+                  </div>
+                  <div class="badge-row" id="result-badges"></div>
+                </div>
+
+                <p
+                  class="alert alert-error"
+                  id="comparison-error"
+                  role="alert"
+                  hidden
+                ></p>
+                <div class="summary-grid" id="summary-grid"></div>
+              </section>
+
+              <section
+                id="analysis-outcome"
+                class="workspace-section"
+                hidden
+                aria-labelledby="outcome-heading"
+              >
+                <div class="section-head">
+                  <div>
+                    <h3 id="outcome-heading">Final observed finding</h3>
+                    <p class="section-note">
+                      Observation from this single paired trial only.
+                    </p>
+                  </div>
+                  <div class="badge-row" id="analysis-badges"></div>
+                </div>
+                <div class="analysis-finding" id="analysis-finding"></div>
+              </section>
+
+              <section
+                id="analysis-details"
+                class="workspace-section"
+                hidden
+                aria-label="Detailed analysis"
+              >
+                <details class="compact-panel">
+                  <summary>
+                    <span>Recommendation and budget validation</span>
+                    <span class="compact-meta"
+                      >Deterministic checks when applicable</span
+                    >
+                  </summary>
+                  <div class="compact-content">
+                    <div class="validation-grid" id="validation-grid"></div>
+                  </div>
+                </details>
+
+                <details class="compact-panel">
+                  <summary>
+                    <span>Captured facts</span>
+                    <span class="compact-meta"
+                      >Structured values from saved evidence</span
+                    >
+                  </summary>
+                  <div class="compact-content">
+                    <div class="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th scope="col">Item</th>
+                            <th scope="col">Captured value</th>
+                            <th scope="col">Currency</th>
+                            <th scope="col">Normalized INR</th>
+                            <th scope="col">Constraint status</th>
+                            <th scope="col">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody id="products-body"></tbody>
+                      </table>
+                    </div>
+                  </div>
+                </details>
+
+                <details class="compact-panel">
+                  <summary><span>Limitations</span></summary>
+                  <div class="compact-content">
+                    <ul class="limitations" id="limitations-list"></ul>
+                  </div>
+                </details>
+
+                <details class="compact-panel">
+                  <summary><span>Saved reports</span></summary>
+                  <div class="compact-content">
+                    <div class="report-links" id="report-links"></div>
+                  </div>
+                </details>
+              </section>
             </section>
           </div>
+        </aside>
 
-          <div class="composer-slot" id="composer-slot"></div>
+        <section
+          class="request-panel"
+          id="conversation-panel"
+          aria-label="Research request"
+        >
+          <div class="request-heading">
+            <h2>Request</h2>
+            <p class="panel-subtitle">
+              Describe your research task and provide the webpage URLs.
+            </p>
+          </div>
+          <div class="request-body" id="conversation">
+            <article class="user-turn request-origin" aria-hidden="true">
+              <p class="turn-label">Submitted request</p>
+              <p id="submitted-prompt" class="submitted-prompt"></p>
+            </article>
+            <div class="composer-slot" id="composer-slot"></div>
+          </div>
         </section>
       </section>
     </main>

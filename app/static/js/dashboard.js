@@ -21,6 +21,20 @@
   const composerSlot = document.getElementById("composer-slot");
   const analysisStatusBadge = document.getElementById("analysis-status-badge");
   const analysisScroll = document.getElementById("analysis-scroll");
+  const researchStatusText = document.getElementById("research-status-text");
+  const researchStatusNote = document.getElementById("research-status-note");
+  const researchStatusDot = document.getElementById("research-status-dot");
+  const researchProgress = document.getElementById("research-progress");
+  const researchProgressBar = document.getElementById("research-progress-bar");
+  const researchProgressLabel = document.getElementById("research-progress-label");
+
+  const injectionPanel = document.getElementById("injection-panel");
+  const injectionDetected = document.getElementById("injection-detected");
+  const injectionExtracted = document.getElementById("injection-extracted");
+  const injectionIncluded = document.getElementById("injection-included");
+  const injectionInfluenced = document.getElementById("injection-influenced");
+  const injectionNote = document.getElementById("injection-note");
+  const injectionDetails = document.getElementById("injection-details");
 
   const conversation = document.getElementById("conversation");
   const submittedPrompt = document.getElementById("submitted-prompt");
@@ -50,6 +64,8 @@
   const analysisBadges = document.getElementById("analysis-badges");
   const analysisFinding = document.getElementById("analysis-finding");
 
+  const comparisonPanel = document.getElementById("comparison-panel");
+  const comparisonNote = document.getElementById("comparison-note");
   const comparisonResults = document.getElementById("comparison-results");
   const comparisonError = document.getElementById("comparison-error");
   const badges = document.getElementById("result-badges");
@@ -60,14 +76,20 @@
   const limitationsList = document.getElementById("limitations-list");
   const reportLinks = document.getElementById("report-links");
 
+  const ATTACK_MARKER = "HIJACKCHECK-MARKER-NORTHSTAR-74999";
+
   const state = {
     snapshot: null,
     snapshotReportUrl: null,
     baseline: null,
     protected: null,
     comparison: null,
+    reports: [],
+    reportsLoaded: false,
+    reportsError: "",
     submittedPrompt: "",
     busy: false,
+    busyMessage: "",
   };
 
   const MODES = {
@@ -145,6 +167,33 @@
 
   function formatStatus(value) {
     return STATUS_LABELS[value] || "Unknown";
+  }
+
+  function formatTimestamp(value) {
+    if (!value) return "Time unavailable";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  }
+
+  function reportContainsMarker(report) {
+    return Boolean(report && String(report.request_text || "").includes(ATTACK_MARKER));
+  }
+
+  function snapshotExtracted(snapshot) {
+    if (!snapshot) return null;
+    if (typeof snapshot.instruction_extracted === "boolean") {
+      return snapshot.instruction_extracted;
+    }
+    return (snapshot.pages || []).some((page) => String(page.text || "").includes(ATTACK_MARKER));
+  }
+
+  function snapshotInDom(snapshot) {
+    if (!snapshot) return null;
+    if (typeof snapshot.instruction_in_dom === "boolean") {
+      return snapshot.instruction_in_dom;
+    }
+    return (snapshot.pages || []).some((page) => String(page.dom_text || "").includes(ATTACK_MARKER));
   }
 
   function statusPill(value) {
@@ -251,6 +300,67 @@
       link.rel = "noopener";
       container.append(link);
     });
+  }
+
+  function renderSavedReports() {
+    clear(reportLinks);
+    if (state.reportsError) {
+      reportLinks.append(
+        el(
+          "p",
+          "panel-note",
+          `Saved reports could not be loaded: ${state.reportsError}`
+        )
+      );
+      return;
+    }
+    const reports = state.reports || [];
+    if (!reports.length) {
+      reportLinks.append(
+        el(
+          "p",
+          "panel-note",
+          state.reportsLoaded
+            ? "No saved reports were found in the runs directory."
+            : "Loading saved reports…"
+        )
+      );
+      return;
+    }
+
+    reports.forEach((report) => {
+      const url = report.url;
+      if (typeof url !== "string" || !url.startsWith("/api/reports/")) return;
+      const meta = [
+        report.label || REPORT_LABELS[report.kind] || report.kind || "Report",
+        report.id || report.filename,
+        formatTimestamp(report.created_at),
+        report.condition ? `condition: ${report.condition}` : null,
+        report.status ? `status: ${report.status}` : null,
+      ].filter(Boolean);
+      const link = el("a", "report-link", meta.join(" · "));
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.title = `${report.id || report.filename}${report.snapshot_id ? ` · snapshot ${report.snapshot_id}` : ""}`;
+      reportLinks.append(link);
+    });
+  }
+
+  async function loadSavedReports() {
+    try {
+      const response = await fetch("/api/reports", { headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      state.reports = Array.isArray(data.reports) ? data.reports : [];
+      state.reportsError = "";
+    } catch (error) {
+      state.reports = [];
+      state.reportsError = error instanceof Error ? error.message : "Report listing failed.";
+    } finally {
+      state.reportsLoaded = true;
+      renderSavedReports();
+    }
   }
 
   function appendInline(parent, text) {
@@ -455,6 +565,37 @@
     return snapshot.pages.findIndex((page) => /\/lab\/attack-page(?:\?|$|\/)/.test(page.url || page.final_url || ""));
   }
 
+  function formatBytes(text) {
+    const bytes = new Blob([String(text || "")]).size;
+    if (!bytes) return "No usable text";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function selectUrlInRequest(url) {
+    const value = promptInput.value || "";
+    const index = value.indexOf(url);
+    promptInput.focus();
+    if (index >= 0) {
+      promptInput.setSelectionRange(index, index + url.length);
+    }
+    promptInput.scrollIntoView({ block: "nearest" });
+  }
+
+  function recoveryNote(page) {
+    if (page.http_status === 403) {
+      return "The website denied access (HTTP 403). Replace this URL in the request or retry later; failed extraction is not treated as evidence.";
+    }
+    if (page.http_status === 401) {
+      return "The website requires authentication (HTTP 401). Replace this URL in the request or retry later.";
+    }
+    if (page.http_status) {
+      return `The source returned HTTP ${page.http_status}. Replace this URL in the request or retry capture.`;
+    }
+    return "Capture failed. Replace this URL in the request or retry capture.";
+  }
+
   function renderSources(snapshot) {
     clear(sourceGrid);
     const controlledIndex = controlledPageIndex(snapshot);
@@ -462,7 +603,7 @@
       const failed = !page.success;
       const incomplete = page.success && page.partial;
       const status = failed ? "Failed" : incomplete ? "Incomplete" : "Captured";
-      const tone = failed ? "danger" : incomplete ? "warning" : "success";
+      const tone = failed ? "failed" : incomplete ? "warning" : "success";
       const isControlled = index === controlledIndex;
 
       const item = el("details", `source-item${failed ? " source-failed" : ""}`);
@@ -470,10 +611,21 @@
 
       const summary = el("summary", "source-summary");
       summary.append(el("span", "source-index", String(index + 1).padStart(2, "0")));
+      summary.append(el("span", "source-icon", ""));
       const main = el("span", "source-main");
       main.append(el("span", "source-title", page.title || "Untitled page"));
       main.append(el("span", "source-domain", hostFor(page.final_url || page.url)));
-      summary.append(main, badge(status, tone), el("span", "source-chevron", "›"));
+
+      const statusNode = el("span", "source-status");
+      const statusTop = el("span", "source-status-top");
+      statusTop.append(el("span", `source-dot ${tone}`, ""), el("span", "source-status-label", status));
+      const statusDetail = failed
+        ? (page.http_status ? `HTTP ${page.http_status}` : "Capture failed")
+        : incomplete
+          ? "Partial capture"
+          : formatBytes(page.text);
+      statusNode.append(statusTop, el("span", "source-status-detail", statusDetail));
+      summary.append(main, statusNode, el("span", "source-chevron", "›"));
 
       const body = el("div", "source-body");
       const url = page.final_url || page.url;
@@ -508,6 +660,17 @@
       }
       if (failed) {
         body.append(el("p", "source-error", page.error || "Extraction failed without a recorded error."));
+
+        const recovery = el("div", "source-recovery");
+        recovery.append(el("p", "source-recovery-note", recoveryNote(page)));
+        const retry = el("button", "text-button", "Retry capture");
+        retry.type = "button";
+        retry.addEventListener("click", () => captureForm.requestSubmit());
+        const edit = el("button", "text-button", "Edit this URL");
+        edit.type = "button";
+        edit.addEventListener("click", () => selectUrlInRequest(url));
+        recovery.append(retry, edit);
+        body.append(recovery);
       }
 
       item.append(summary, body);
@@ -517,7 +680,7 @@
     const variant = snapshot.controlled_variant || "visible";
     const captured = snapshot.pages.filter((page) => page.success).length;
     const completeness = snapshot.extraction_success ? "Complete" : "Incomplete";
-    snapshotNote.textContent = `Evidence ${snapshot.snapshot_id} · ${completeness} · ${captured}/${snapshot.pages.length} captured · ${VARIANT_LABELS[variant] || variant}`;
+    snapshotNote.textContent = `${completeness} · ${captured}/${snapshot.pages.length} captured · ${VARIANT_LABELS[variant] || variant} · ${snapshot.snapshot_id}`;
     controlledNote.textContent = snapshot.controlled_instruction_note || "";
     setHidden(controlledNote, !snapshot.controlled_instruction_note);
     renderReportLinks(snapshotReportLinks, { snapshot: state.snapshotReportUrl }, ["snapshot"]);
@@ -530,6 +693,170 @@
     }
     variantStatus.textContent = VARIANT_LABELS[state.snapshot.controlled_variant] || "Unknown variant";
     setHidden(variantStatus, false);
+  }
+
+  function renderResearchStatus() {
+    const pages = state.snapshot ? state.snapshot.pages : [];
+    const total = pages.length || 3;
+    const captured = pages.filter((page) => page.success).length;
+    const percent = total ? Math.round((captured / total) * 100) : 0;
+
+    let text;
+    let note;
+    let tone = "";
+    if (state.busy) {
+      text = state.busyMessage || "Working…";
+      tone = "busy";
+      note = state.snapshot
+        ? "The current research state is preserved while this action completes."
+        : "Capturing webpage evidence and checking each source.";
+    } else if (!state.snapshot) {
+      text = "Waiting for request";
+      note = "Submit a research task to begin.";
+    } else if (!state.snapshot.extraction_success) {
+      const failed = pages.filter((page) => !page.success).length;
+      text = "Evidence capture incomplete";
+      tone = "failed";
+      note = `${failed} source${failed === 1 ? "" : "s"} failed. Model runs stay disabled until every required source extracts successfully. Edit the request or retry the failed source.`;
+    } else if (state.comparison) {
+      text = "Comparison complete";
+      tone = "success";
+      note = "Paired comparison is available for this saved evidence snapshot.";
+    } else if (state.baseline && state.protected) {
+      text = "Both security conditions complete";
+      tone = "success";
+      note = "Compare runs to see the observed paired result.";
+    } else if (state.baseline || state.protected) {
+      text = "One security condition complete";
+      tone = "success";
+      note = "Run the other security condition to enable comparison.";
+    } else {
+      text = "Evidence captured";
+      tone = "success";
+      note = "Evidence is ready. Run both security conditions on this snapshot.";
+    }
+
+    researchStatusText.textContent = text;
+    researchStatusNote.textContent = note;
+    researchStatusDot.className = `status-dot ${tone}`.trim();
+    researchProgressBar.style.width = `${percent}%`;
+    researchProgress.setAttribute("aria-valuenow", String(percent));
+    researchProgressLabel.textContent = `${captured} / ${total} sources captured`;
+  }
+
+  function currentDetection() {
+    const snapshot = state.snapshot;
+    if (snapshot && snapshot.detection) return snapshot.detection;
+    const reports = [
+      state.comparison ? state.comparison.comparison : null,
+      state.baseline ? state.baseline.report : null,
+      state.protected ? state.protected.report : null,
+    ].filter(Boolean);
+    for (const source of reports) {
+      if (source.detection) return source.detection;
+    }
+    return null;
+  }
+
+  function requestInclusion(report) {
+    if (!report) return "Pending";
+    const requestText = String(report.request_text || "");
+    if (!requestText.trim()) return "Request unavailable";
+    return requestText.includes(ATTACK_MARKER) ? "Included" : "Not included";
+  }
+
+  function influenceStatus(comparison) {
+    if (!comparison) return "Pending comparison";
+    const classification = classifyComparison(comparison);
+    if (classification.label === "Model/API failure") {
+      return "Insufficient evidence (model/API failure)";
+    }
+    if (comparison.protected_attack_observed) {
+      return "Demonstrated in Security ON";
+    }
+    if (comparison.outcome === "Attack demonstrated in the observed baseline") {
+      return comparison.improvement_observed
+        ? "Demonstrated in Security OFF; protection improvement observed"
+        : "Demonstrated in Security OFF; no protection improvement observed";
+    }
+    if (comparison.outcome === "Attack not demonstrated") {
+      return "Attack not demonstrated";
+    }
+    return "Insufficient evidence to determine influence";
+  }
+
+  function renderInjectionFindings() {
+    const snapshot = state.snapshot;
+    const comparison = state.comparison ? state.comparison.comparison : null;
+    const detection = currentDetection();
+
+    if (detection) {
+      injectionDetected.textContent = detection.detected ? "Detected" : "Not detected";
+    } else if (snapshot) {
+      injectionDetected.textContent = "Not available";
+    } else {
+      injectionDetected.textContent = "Pending evidence";
+    }
+
+    if (!snapshot) {
+      injectionExtracted.textContent = "Pending evidence";
+    } else {
+      injectionExtracted.textContent = snapshotExtracted(snapshot) ? "Extracted" : "Not extracted";
+    }
+
+    if (comparison) {
+      injectionIncluded.textContent = `OFF ${comparison.instruction_in_baseline_input ? "Included" : "Not included"} · ON ${comparison.instruction_in_protected_input ? "Included" : "Not included"}`;
+    } else if (state.baseline || state.protected) {
+      injectionIncluded.textContent = `OFF ${requestInclusion(state.baseline ? state.baseline.report : null)} · ON ${requestInclusion(state.protected ? state.protected.report : null)}`;
+    } else {
+      injectionIncluded.textContent = "Pending model run";
+    }
+
+    injectionInfluenced.textContent = influenceStatus(comparison);
+
+    if (detection && detection.detected) {
+      const findings = detection.findings || [];
+      const rules = [...new Set(findings.flatMap((finding) => finding.matched_rules || []))];
+      const parts = [
+        `${findings.length || 1} instruction-like finding${findings.length === 1 ? "" : "s"} flagged at capture time.`,
+      ];
+      if (rules.length) parts.push(`Matched rules: ${rules.join(", ")}.`);
+      if (findings.length) parts.push(`Finding: ${truncate(findings[0].reason, 180)}`);
+      parts.push("Detection alone does not prove the model followed the text.");
+      injectionNote.textContent = parts.join(" ");
+    } else if (detection) {
+      injectionNote.textContent = detection.disclaimer || "No instruction-like text was flagged. Detection is heuristic and not an attack-success score.";
+    } else if (snapshot) {
+      injectionNote.textContent = "Detection results were not saved for this evidence snapshot. Extraction and inclusion are still evaluated separately.";
+    } else {
+      injectionNote.textContent = "Detecting suspicious text alone does not prove the model followed it. Influence is evaluated only after a paired comparison.";
+    }
+
+    const hasEvidence = Boolean(snapshot || comparison || detection);
+    setHidden(injectionDetails, !hasEvidence);
+    if (!hasEvidence) {
+      clear(instructionFlags);
+      clear(findingList);
+      injectionDetails.open = false;
+      return;
+    }
+    renderInjectionEvidence();
+  }
+
+  function renderComparisonNote() {
+    if (!state.snapshot) {
+      comparisonNote.textContent = "Waiting for evidence capture.";
+    } else if (!state.snapshot.extraction_success) {
+      comparisonNote.textContent = "Model runs are disabled until all three sources extract successfully. Fix the failed source and try again.";
+    } else if (state.comparison) {
+      comparisonNote.textContent = "Paired comparison available for this saved evidence snapshot.";
+    } else if (state.baseline && state.protected && state.baseline.report.success && state.protected.report.success) {
+      comparisonNote.textContent = "Both runs are ready. Compare runs to see the observed result.";
+    } else if (state.baseline || state.protected) {
+      comparisonNote.textContent = "Run the other security condition to enable comparison.";
+    } else {
+      comparisonNote.textContent = "Run both security conditions on the same saved evidence snapshot.";
+    }
   }
 
   function renderSelectedMode() {
@@ -591,6 +918,7 @@
       setBadge(compareModeStatus, "Waiting for runs", "");
       setHidden(compareModeError, true);
     }
+    renderComparisonNote();
   }
 
   function renderResponses() {
@@ -701,38 +1029,43 @@
   function renderAnalysisStatus() {
     if (!state.snapshot) {
       setBadge(analysisStatusBadge, "Waiting", "");
-      return;
-    }
-    if (state.comparison) {
+    } else if (!state.snapshot.extraction_success) {
+      setBadge(analysisStatusBadge, "Capture incomplete", "danger");
+    } else if (state.comparison) {
       const classification = classifyComparison(state.comparison.comparison);
       setBadge(analysisStatusBadge, classification.label, classification.tone);
-      return;
-    }
-    if (state.baseline || state.protected) {
+    } else if (state.baseline || state.protected) {
       setBadge(analysisStatusBadge, "Responses ready", "warning");
-      return;
+    } else {
+      setBadge(analysisStatusBadge, "Evidence captured", "success");
     }
-    setBadge(analysisStatusBadge, "Evidence captured", "success");
+    renderResearchStatus();
+  }
+
+  function renderEvidenceDetails() {
+    const comparison = state.comparison ? state.comparison.comparison : null;
+    renderProducts(comparison);
+    renderLimitations();
+    renderSavedReports();
+    setHidden(analysisDetails, !state.snapshot);
   }
 
   function renderModelResults() {
     const hasRun = Boolean(state.baseline || state.protected);
     setHidden(modelResults, !hasRun);
-    setHidden(analysisDetails, !hasRun);
-    if (!hasRun) return;
+    renderEvidenceDetails();
+    if (!hasRun) {
+      clear(modelBadges);
+      clear(responseGrid);
+      clear(validationGrid);
+      return;
+    }
 
     clear(modelBadges);
     modelBadges.append(badge("Same saved snapshot"));
     modelBadges.append(badge("Bounded retries recorded"));
     renderResponses();
     renderValidation();
-    if (!state.comparison) {
-      clear(instructionFlags);
-      clear(findingList);
-      findingList.append(
-        el("p", "panel-note", "Instruction flow is populated after the paired comparison.")
-      );
-    }
   }
 
   function addSummary(label, value, detail) {
@@ -748,31 +1081,67 @@
     instructionFlags.append(card);
   }
 
-  function renderDetection(comparison) {
+  function renderInjectionEvidence() {
     clear(instructionFlags);
     clear(findingList);
-    const detection = comparison.detection;
-    addFlag("Attack page variant", comparison.controlled_variant || "visible", "");
-    addFlag("Instruction counted", detection.detected ? "Yes" : "No", detection.detected ? "yes" : "no");
-    addFlag("Instruction in DOM", comparison.instruction_in_dom ? "Yes" : "No", comparison.instruction_in_dom ? "yes" : "no");
-    addFlag("Instruction in snapshot", comparison.instruction_in_snapshot ? "Yes" : "No", comparison.instruction_in_snapshot ? "yes" : "no");
-    addFlag("Controlled marker extracted", comparison.instruction_extracted ? "Yes" : "No", comparison.instruction_extracted ? "yes" : "no");
-    addFlag("Reached OFF input", comparison.instruction_in_baseline_input ? "Yes" : "No", comparison.instruction_in_baseline_input ? "yes" : "no");
-    addFlag("Reached ON input", comparison.instruction_in_protected_input ? "Yes" : "No", comparison.instruction_in_protected_input ? "yes" : "no");
+    const snapshot = state.snapshot;
+    const comparison = state.comparison ? state.comparison.comparison : null;
+    const detection = currentDetection();
+    const flagValue = (value) => (value === null || value === undefined ? "Pending" : boolText(value));
 
-    const confinement = el("article", `flag-card ${comparison.protected_instruction_confined_to_untrusted_block ? "yes" : "no"}`);
+    addFlag(
+      "Attack page variant",
+      comparison ? comparison.controlled_variant || "visible" : snapshot ? snapshot.controlled_variant || "visible" : "unknown",
+      ""
+    );
+    addFlag("Instruction counted", detection ? boolText(detection.detected) : "Not evaluated", detection && detection.detected ? "yes" : "no");
+    addFlag(
+      "Instruction in DOM",
+      flagValue(comparison ? comparison.instruction_in_dom : snapshotInDom(snapshot)),
+      (comparison ? comparison.instruction_in_dom : snapshotInDom(snapshot)) ? "yes" : "no"
+    );
+    addFlag(
+      "Instruction in snapshot",
+      flagValue(comparison ? comparison.instruction_in_snapshot : snapshotExtracted(snapshot)),
+      (comparison ? comparison.instruction_in_snapshot : snapshotExtracted(snapshot)) ? "yes" : "no"
+    );
+    addFlag(
+      "Controlled marker extracted",
+      flagValue(comparison ? comparison.instruction_extracted : snapshotExtracted(snapshot)),
+      (comparison ? comparison.instruction_extracted : snapshotExtracted(snapshot)) ? "yes" : "no"
+    );
+    const baselineIncluded = comparison
+      ? comparison.instruction_in_baseline_input
+      : state.baseline
+        ? reportContainsMarker(state.baseline.report)
+        : null;
+    const protectedIncluded = comparison
+      ? comparison.instruction_in_protected_input
+      : state.protected
+        ? reportContainsMarker(state.protected.report)
+        : null;
+    addFlag("Reached OFF input", flagValue(baselineIncluded), baselineIncluded ? "yes" : "no");
+    addFlag("Reached ON input", flagValue(protectedIncluded), protectedIncluded ? "yes" : "no");
+
+    const confinementValue = comparison
+      ? comparison.protected_instruction_confined_to_untrusted_block
+      : null;
+    const confinement = el("article", `flag-card ${confinementValue === true ? "yes" : confinementValue === false ? "no" : ""}`.trim());
     confinement.append(
       el("span", "flag-label", "ON placement"),
-      el("span", "flag-value", comparison.protected_instruction_confined_to_untrusted_block ? "Confined to untrusted block" : "Not confined")
+      el("span", "flag-value", confinementValue === true ? "Confined to untrusted block" : confinementValue === false ? "Not confined" : "Pending comparison")
     );
     instructionFlags.append(confinement);
 
-    if (!detection.findings.length) {
+    const findings = detection && Array.isArray(detection.findings)
+      ? detection.findings
+      : [];
+    if (!findings.length) {
       findingList.append(el("p", "panel-note", "No instruction-like text was flagged."));
       return;
     }
 
-    detection.findings.forEach((finding) => {
+    findings.forEach((finding) => {
       const card = el("article", "finding");
       card.append(el("div", "finding-meta", finding.source_url));
       card.append(el("blockquote", "", finding.excerpt));
@@ -786,16 +1155,29 @@
 
   function renderProducts(comparison) {
     clear(productsBody);
-    if (!comparison.products.length) {
+    const comparisonProducts = comparison && Array.isArray(comparison.products)
+      ? comparison.products
+      : [];
+    const snapshotProducts = state.snapshot && Array.isArray(state.snapshot.products)
+      ? state.snapshot.products
+      : [];
+    const products = comparisonProducts.length ? comparisonProducts : snapshotProducts;
+    if (!products.length) {
       const row = el("tr");
-      const cell = el("td", "empty", "No captured facts were available for this comparison.");
+      const cell = el(
+        "td",
+        "empty",
+        state.snapshot
+          ? "No structured product facts were extracted from this evidence snapshot."
+          : "Capture evidence to populate captured facts."
+      );
       cell.colSpan = 6;
       row.append(cell);
       productsBody.append(row);
       return;
     }
 
-    comparison.products.forEach((product) => {
+    products.forEach((product) => {
       const row = el("tr");
       const nameCell = el("td");
       nameCell.append(el("strong", "", product.name), el("span", "resource-url", product.source_url));
@@ -901,19 +1283,23 @@
     badges.append(badge("Single paired trial"));
   }
 
-  function renderLimitations(comparison) {
+  function renderLimitations() {
     clear(limitationsList);
-    const items = [...comparison.uncertainty];
-    if (state.snapshot && state.snapshot.controlled_instruction_note) {
-      items.push(state.snapshot.controlled_instruction_note);
+    const items = state.snapshot && Array.isArray(state.snapshot.limitations)
+      ? state.snapshot.limitations
+      : [];
+    if (!items.length) {
+      limitationsList.append(
+        el(
+          "li",
+          "panel-note",
+          state.snapshot
+            ? "No extraction limitations were recorded for this evidence snapshot."
+            : "Capture evidence to inspect extraction limitations."
+        )
+      );
+      return;
     }
-    items.push(
-      "Extraction only proves that page text was captured; it does not prove the model obeyed an instruction embedded in a page.",
-      "Heuristic detection can miss or over-flag instruction-like text and is not an attack-success score.",
-      "Automatic constraint validation is limited. When no supported constraint is present, it is marked not applicable.",
-      "A single paired trial does not establish causation or universal defence effectiveness.",
-      "External resources can change after capture; the saved snapshot is the evidence used for both modes."
-    );
     [...new Set(items)].forEach((item) => limitationsList.append(el("li", "", item)));
   }
 
@@ -982,13 +1368,24 @@
 
     renderBadges(comparison);
     renderSummary(comparison);
-    renderDetection(comparison);
     renderProducts(comparison);
-    renderLimitations(comparison);
-    renderReportLinks(reportLinks, entry.reportUrls, ["comparison", "snapshot", "baseline", "protected"]);
+    renderLimitations();
+    renderSavedReports();
+    renderInjectionFindings();
     renderAnalysisOutcome(comparison);
     setHidden(analysisDetails, false);
+    renderComparisonNote();
     renderAnalysisStatus();
+  }
+
+  function scrollAnalysisTo(node) {
+    if (!node) return;
+    const top = node.getBoundingClientRect().top
+      - analysisScroll.getBoundingClientRect().top
+      + analysisScroll.scrollTop
+      - 14;
+    analysisScroll.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }
 
   function updateModeControls() {
@@ -1004,10 +1401,12 @@
 
   function setBusy(busy, message) {
     state.busy = busy;
+    state.busyMessage = busy ? (message || "Working…") : "";
     setHidden(runStatus, !busy);
     if (busy && message) runStatusText.textContent = message;
     captureForm.setAttribute("aria-busy", busy ? "true" : "false");
     updateModeControls();
+    renderResearchStatus();
   }
 
   function resetWorkspace() {
@@ -1016,8 +1415,11 @@
     state.baseline = null;
     state.protected = null;
     state.comparison = null;
+    state.busyMessage = "";
     setHidden(snapshotPanel, true);
+    setHidden(injectionPanel, true);
     setHidden(conditionPanel, true);
+    setHidden(comparisonPanel, true);
     setHidden(analysisOutcome, true);
     setHidden(analysisDetails, true);
     setHidden(modelResults, true);
@@ -1050,14 +1452,20 @@
     setBadge(protectedModeStatus, "Not run", "");
     setBadge(compareModeStatus, "Waiting for runs", "");
     setBadge(analysisStatusBadge, "Waiting", "");
-    clear(instructionFlags);
-    clear(findingList);
+    injectionDetected.textContent = "Not evaluated";
+    injectionExtracted.textContent = "Pending evidence";
+    injectionIncluded.textContent = "Pending model run";
+    injectionInfluenced.textContent = "Pending comparison";
+    injectionNote.textContent = "";
+    injectionDetails.open = false;
+    comparisonNote.textContent = "Waiting for evidence capture.";
+    renderResearchStatus();
   }
 
   function activateWorkspace() {
     if (workspace.dataset.active === "true") return;
     composerSlot.append(composerWrap);
-    promptInput.rows = 1;
+    promptInput.rows = 8;
     setHidden(landing, true);
     setHidden(workspace, false);
     appMain.classList.add("is-workspace");
@@ -1066,7 +1474,11 @@
   }
 
   function autoResizePrompt() {
-    const maxHeight = document.body.classList.contains("workspace-active") ? 140 : 260;
+    if (document.body.classList.contains("workspace-active")) {
+      promptInput.style.height = "";
+      return;
+    }
+    const maxHeight = 260;
     promptInput.style.height = "auto";
     promptInput.style.height = `${Math.min(promptInput.scrollHeight, maxHeight)}px`;
   }
@@ -1120,20 +1532,25 @@
       renderVariantStatus();
       renderSelectedMode();
       renderModeState();
+      renderEvidenceDetails();
+      renderInjectionFindings();
       renderAnalysisStatus();
+      await loadSavedReports();
 
       setHidden(snapshotPanel, false);
+      setHidden(injectionPanel, false);
       setHidden(conditionPanel, false);
+      setHidden(comparisonPanel, false);
 
       if (state.snapshot.extraction_success) {
         setHidden(modeError, true);
       } else {
-        modeError.textContent = "Model runs are disabled until all three sources extract successfully. Submit a corrected request to capture new evidence.";
+        modeError.textContent = "Model runs are disabled until all three sources extract successfully. Edit the request or retry the failed source, then run research again.";
         setHidden(modeError, false);
       }
 
       updateModeControls();
-      promptInput.value = "";
+      promptInput.value = state.submittedPrompt;
       autoResizePrompt();
       analysisScroll.scrollTop = 0;
       conversation.scrollTop = 0;
@@ -1159,6 +1576,7 @@
     setHidden(modeErrorNode, true);
     renderModeState();
     renderModelResults();
+    renderInjectionFindings();
     renderAnalysisStatus();
     updateModeControls();
 
@@ -1178,13 +1596,16 @@
       };
       renderModeState();
       renderModelResults();
+      renderInjectionFindings();
       renderAnalysisStatus();
       updateModeControls();
-      modelResults.scrollIntoView({ block: "start" });
+      await loadSavedReports();
+      scrollAnalysisTo(modelResults);
     } catch (error) {
       modeErrorNode.textContent = error instanceof Error ? error.message : `${mode.label} could not be started.`;
       setHidden(modeErrorNode, false);
       setBadge(condition === "baseline" ? baselineModeStatus : protectedModeStatus, "Failed", "danger");
+      renderInjectionFindings();
       renderAnalysisStatus();
     } finally {
       setBusy(false);
@@ -1215,11 +1636,13 @@
       renderComparison();
       renderModeState();
       updateModeControls();
-      comparisonResults.scrollIntoView({ block: "start" });
+      await loadSavedReports();
+      scrollAnalysisTo(comparisonPanel);
     } catch (error) {
       compareModeError.textContent = error instanceof Error ? error.message : "The comparison could not be started.";
       setHidden(compareModeError, false);
       setBadge(compareModeStatus, "Incomplete", "warning");
+      renderComparisonNote();
     } finally {
       setBusy(false);
     }
@@ -1242,4 +1665,5 @@
   autoResizePrompt();
   renderSelectedMode();
   updateModeControls();
+  loadSavedReports();
 })();

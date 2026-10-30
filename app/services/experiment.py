@@ -17,15 +17,17 @@ from app.schemas import (
 from app.security.url_policy import URLPolicyError, canonical_url, validate_url
 from app.services.evaluation import compare_conditions, evidence_sha256
 from app.services.extraction import extract_page
-from app.services.fixture import variant_from_url
+from app.services.fixture import ATTACK_MARKER, variant_from_url
 from app.services.gemma import run_baseline
 from app.services.protection import (
     assess_controlled_instruction_relevance,
+    detect_suspicious_content,
     extract_budget_inr,
+    extract_product_facts,
     run_protected,
     validate_recommendation,
 )
-from app.services.reporting import save_report
+from app.services.reporting import extraction_limitations, save_report
 
 SNAPSHOT_ID_PATTERN = re.compile(r"^evidence-[A-Za-z0-9_-]+$")
 
@@ -182,6 +184,22 @@ def _extract_pages(
     return pages
 
 
+def _snapshot_analysis(pages: Sequence[EvidencePage], task: str) -> dict:
+    """Compute deterministic evidence findings at capture time, without a model."""
+    successful_pages = [page for page in pages if page.success]
+    return {
+        "detection": detect_suspicious_content(pages),
+        "products": extract_product_facts(pages, task),
+        "limitations": extraction_limitations(list(pages)),
+        "instruction_extracted": any(
+            ATTACK_MARKER in (page.text or "") for page in successful_pages
+        ),
+        "instruction_in_dom": any(
+            ATTACK_MARKER in (page.dom_text or "") for page in successful_pages
+        ),
+    }
+
+
 def capture_evidence(
     task: str,
     urls: Sequence[str],
@@ -215,6 +233,7 @@ def capture_evidence(
         extraction_success=extraction_success,
         controlled_variant=variant_from_url(urls[2]),
         controlled_instruction_note=assess_controlled_instruction_relevance(task),
+        **_snapshot_analysis(pages, task),
     )
     snapshot_path = save_report(snapshot, runs_dir)
     return CaptureOutcome(
@@ -403,6 +422,7 @@ def run_experiment(
         extraction_success=extraction_success,
         controlled_variant=variant_from_url(urls[2]),
         controlled_instruction_note=assess_controlled_instruction_relevance(task),
+        **_snapshot_analysis(pages, task),
     )
     snapshot_path = save_report(snapshot, runs_dir)
 

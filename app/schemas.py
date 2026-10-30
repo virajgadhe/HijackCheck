@@ -171,6 +171,11 @@ class EvidenceSnapshot(BaseModel):
     extraction_success: bool
     controlled_variant: str = "visible"
     controlled_instruction_note: str = ""
+    detection: DetectionResult | None = None
+    products: list[ProductFact] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    instruction_extracted: bool = False
+    instruction_in_dom: bool = False
 
 
 class ExperimentReport(BaseModel):

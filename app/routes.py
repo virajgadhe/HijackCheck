@@ -36,7 +36,7 @@ from app.services.fixture import (
 )
 from app.services.gemma import run_baseline
 from app.services.prompt_parser import ResearchPromptError, parse_research_prompt
-from app.services.reporting import save_report
+from app.services.reporting import list_saved_reports, save_report
 
 main = Blueprint("main", __name__)
 
@@ -253,6 +253,18 @@ def experiment():
         ),
         outcome.status_code,
     )
+
+
+@main.get("/api/reports")
+def report_index():
+    reports = list_saved_reports(current_app.config["RUNS_DIR"])
+    for report in reports:
+        report["url"] = _report_url(report["filename"])
+    counts = {
+        kind: sum(1 for report in reports if report["kind"] == kind)
+        for kind in ("snapshot", "baseline", "protected", "comparison", "experiment")
+    }
+    return jsonify(reports=reports, counts=counts)
 
 
 @main.get("/api/reports/<filename>")

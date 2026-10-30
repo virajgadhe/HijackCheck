@@ -172,7 +172,7 @@ def test_index_renders_single_composer_workspace_without_secret(tmp_path):
     assert "Resource 3" not in html
     assert "Security OFF" in html
     assert "Security ON" in html
-    assert "Sources and evidence" in html
+    assert "Sources and Evidence" in html
     assert "https://system76.com/laptops/lemur-pro" not in html
     assert SECRET not in html
 
@@ -284,6 +284,55 @@ def test_experiment_endpoint_requires_controlled_third_url(tmp_path):
 
     assert response.status_code == 400
     assert "controlled" in response.get_json()["error"].lower()
+
+
+def test_report_index_lists_saved_snapshots_and_model_reports(tmp_path):
+    (tmp_path / "evidence-20261022T105006Z-abe5fece.json").write_text(
+        json.dumps(
+            {
+                "snapshot_id": "evidence-20261022T105006Z-abe5fece",
+                "created_at": "2026-10-22T10:50:06+00:00",
+                "task": TASK,
+                "pages": [],
+                "evidence_sha256": "a" * 64,
+                "extraction_success": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "baseline-20261022T105019Z-31aab376.json").write_text(
+        json.dumps(
+            {
+                "run_id": "baseline-20261022T105019Z-31aab376",
+                "condition": "baseline",
+                "created_at": "2026-10-22T10:50:19+00:00",
+                "success": True,
+                "snapshot_id": "evidence-20261022T105006Z-abe5fece",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "not-a-report.txt").write_text("ignored", encoding="utf-8")
+
+    app = create_app()
+    app.config.update(TESTING=True, RUNS_DIR=str(tmp_path))
+    client = app.test_client()
+
+    response = client.get("/api/reports")
+    data = response.get_json()
+
+    assert response.status_code == 200
+    by_kind = {report["kind"]: report for report in data["reports"]}
+    assert set(by_kind) == {"snapshot", "baseline"}
+    assert by_kind["snapshot"]["status"] == "complete"
+    assert by_kind["baseline"]["status"] == "complete"
+    assert by_kind["baseline"]["condition"] == "baseline"
+    assert data["counts"]["snapshot"] == 1
+    assert data["counts"]["baseline"] == 1
+    for report in data["reports"]:
+        assert report["created_at"]
+        assert report["id"]
+        assert client.get(report["url"]).status_code == 200
 
 
 def test_report_endpoint_rejects_invalid_filename(tmp_path):

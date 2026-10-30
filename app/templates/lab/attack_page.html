@@ -133,7 +133,16 @@
   <script>
     (() => {
       const target = document.getElementById("hidden-injection");
+
+      if (!target) {
+        document.documentElement.dataset.injectionReady = "false";
+        return;
+      }
+
       target.textContent = {{ attack_instruction | tojson }};
+
+      target.dataset.ready = "true";
+      document.documentElement.dataset.injectionReady = "true";
     })();
   </script>
   {% endif %}

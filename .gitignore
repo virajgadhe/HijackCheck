@@ -22,3 +22,6 @@ instance/runs/*
 
 # Graphify generated output
 graphify-out/
+
+# Local UI verification screenshots
+.local-ui-review/
